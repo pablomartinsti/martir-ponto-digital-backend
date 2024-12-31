@@ -1,7 +1,112 @@
 import { Request, Response } from "express";
 import { TimeRecord } from "../models/TimeRecord";
 import { Employee } from "../models/Employee";
-import { error } from "console";
+
+// Filtro por periodo
+export const getTimeRecords = async (req: Request, res: Response) => {
+  try {
+    const { employeeId, startDate, endDate, period } = req.query;
+
+    let dateFilter: any = {};
+
+    console.log("Query recebida:", { employeeId, startDate, endDate, period });
+
+    const now = new Date();
+    now.setHours(23, 59, 59, 999); // Final do dia atual
+
+    // Filtros de data baseados em startDate e endDate
+    if (startDate && endDate) {
+      const start = new Date(startDate as string);
+      const end = new Date(endDate as string);
+      end.setHours(23, 59, 59, 999); // Ajustar endDate para incluir todo o último dia
+
+      // Bloquear períodos futuros
+      if (start > now || end > now) {
+        return res
+          .status(400)
+          .json({
+            error: "Não é permitido buscar dados para períodos futuros.",
+          });
+      }
+
+      dateFilter.clockIn = { $gte: start, $lte: end };
+    } else if (period === "day") {
+      // Período: Dia atual
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0); // Início do dia
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999); // Final do dia
+
+      // Bloquear futuros
+      if (todayEnd > now) {
+        todayEnd.setTime(now.getTime());
+      }
+
+      dateFilter.clockIn = { $gte: todayStart, $lte: todayEnd };
+    } else if (period === "week") {
+      // Período: Semana atual
+      const today = new Date();
+      const firstDayOfWeek = new Date(
+        today.setDate(today.getDate() - today.getDay())
+      ); // Domingo
+      firstDayOfWeek.setHours(0, 0, 0, 0);
+      const lastDayOfWeek = new Date(firstDayOfWeek);
+      lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6); // Sábado
+      lastDayOfWeek.setHours(23, 59, 59, 999);
+
+      // Bloquear futuros
+      if (lastDayOfWeek > now) {
+        lastDayOfWeek.setTime(now.getTime());
+      }
+
+      dateFilter.clockIn = { $gte: firstDayOfWeek, $lte: lastDayOfWeek };
+    } else if (period === "month") {
+      // Período: Mês atual
+      const now = new Date();
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      lastDayOfMonth.setHours(23, 59, 59, 999);
+
+      // Bloquear futuros
+      if (lastDayOfMonth > now) {
+        lastDayOfMonth.setTime(now.getTime());
+      }
+
+      dateFilter.clockIn = { $gte: firstDayOfMonth, $lte: lastDayOfMonth };
+    } else if (period === "year") {
+      // Período: Ano atual
+      const now = new Date();
+      const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
+      const lastDayOfYear = new Date(now.getFullYear(), 11, 31);
+      lastDayOfYear.setHours(23, 59, 59, 999);
+
+      // Bloquear futuros
+      if (lastDayOfYear > now) {
+        lastDayOfYear.setTime(now.getTime());
+      }
+
+      dateFilter.clockIn = { $gte: firstDayOfYear, $lte: lastDayOfYear };
+    } else {
+      return res.status(400).json({
+        error:
+          "O parâmetro 'period' deve ser 'day', 'week', 'month', 'year' ou incluir startDate e endDate.",
+      });
+    }
+
+    if (employeeId) {
+      dateFilter.employeeId = employeeId;
+    }
+
+    console.log("Filtro aplicado:", dateFilter);
+
+    // Consultar registros no banco de dados
+    const records = await TimeRecord.find(dateFilter);
+    res.status(200).json(records);
+  } catch (error) {
+    console.error("Erro no controlador getTimeRecords:", error);
+    res.status(500).json({ error: "Erro ao buscar registros de tempo" });
+  }
+};
 
 // Registrar entrada (clock-in)
 export const clockIn = async (req: Request, res: Response): Promise<void> => {
