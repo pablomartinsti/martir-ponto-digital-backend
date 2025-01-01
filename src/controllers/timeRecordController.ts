@@ -2,8 +2,72 @@ import { Request, Response } from "express";
 import { TimeRecord } from "../models/TimeRecord";
 import { Employee } from "../models/Employee";
 
+// calculo das Horas
+export const calculateWorkHours = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { employeeId, startDate, endDate } = req.query;
+
+    let dateFilter: any = {};
+
+    if (startDate && endDate) {
+      const start = new Date(startDate as string);
+      const end = new Date(endDate as string);
+      end.setHours(23, 59, 59, 999);
+      dateFilter.clockIn = { $gte: start, $lte: end };
+    }
+
+    if (employeeId) {
+      dateFilter.employeeId = employeeId;
+    }
+
+    // Buscar registros no banco
+    const records = await TimeRecord.find(dateFilter);
+
+    // Calcular as horas trabalhadas para cada registro
+    const results = records.map((record) => {
+      const clockIn = record.clockIn ? new Date(record.clockIn) : null;
+      const clockOut = record.clockOut ? new Date(record.clockOut) : null;
+      const lunchStart = record.lunchStart ? new Date(record.lunchStart) : null;
+      const lunchEnd = record.lunchEnd ? new Date(record.lunchEnd) : null;
+
+      if (!clockIn || !clockOut) {
+        return {
+          record,
+          workHours: "Dados insuficientes para calcular horas trabalhadas.",
+        };
+      }
+
+      const totalWorkDuration = clockOut.getTime() - clockIn.getTime();
+      const lunchDuration =
+        lunchStart && lunchEnd ? lunchEnd.getTime() - lunchStart.getTime() : 0;
+
+      const workHours = totalWorkDuration - lunchDuration;
+
+      // Converter para horas e minutos
+      const hours = Math.floor(workHours / (1000 * 60 * 60));
+      const minutes = Math.floor((workHours % (1000 * 60 * 60)) / (1000 * 60));
+
+      return {
+        record,
+        workHours: `${hours}h ${minutes}m`,
+      };
+    });
+
+    res.status(200).json(results);
+  } catch (error) {
+    console.error("Erro ao calcular horas trabalhadas:", error);
+    res.status(500).json({ error: "Erro ao calcular horas trabalhadas." });
+  }
+};
+
 // Filtro por periodo
-export const getTimeRecords = async (req: Request, res: Response) => {
+export const getTimeRecords = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
     const { employeeId, startDate, endDate, period } = req.query;
 
@@ -22,75 +86,51 @@ export const getTimeRecords = async (req: Request, res: Response) => {
 
       // Bloquear períodos futuros
       if (start > now || end > now) {
-        return res
-          .status(400)
-          .json({
-            error: "Não é permitido buscar dados para períodos futuros.",
-          });
+        res.status(400).json({
+          error: "Não é permitido buscar dados para períodos futuros.",
+        });
+        return;
       }
 
       dateFilter.clockIn = { $gte: start, $lte: end };
     } else if (period === "day") {
-      // Período: Dia atual
       const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0); // Início do dia
+      todayStart.setHours(0, 0, 0, 0);
       const todayEnd = new Date();
-      todayEnd.setHours(23, 59, 59, 999); // Final do dia
-
-      // Bloquear futuros
-      if (todayEnd > now) {
-        todayEnd.setTime(now.getTime());
-      }
+      todayEnd.setHours(23, 59, 59, 999);
 
       dateFilter.clockIn = { $gte: todayStart, $lte: todayEnd };
     } else if (period === "week") {
-      // Período: Semana atual
       const today = new Date();
       const firstDayOfWeek = new Date(
         today.setDate(today.getDate() - today.getDay())
-      ); // Domingo
+      );
       firstDayOfWeek.setHours(0, 0, 0, 0);
       const lastDayOfWeek = new Date(firstDayOfWeek);
-      lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6); // Sábado
+      lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6);
       lastDayOfWeek.setHours(23, 59, 59, 999);
-
-      // Bloquear futuros
-      if (lastDayOfWeek > now) {
-        lastDayOfWeek.setTime(now.getTime());
-      }
 
       dateFilter.clockIn = { $gte: firstDayOfWeek, $lte: lastDayOfWeek };
     } else if (period === "month") {
-      // Período: Mês atual
       const now = new Date();
       const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
       const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
       lastDayOfMonth.setHours(23, 59, 59, 999);
 
-      // Bloquear futuros
-      if (lastDayOfMonth > now) {
-        lastDayOfMonth.setTime(now.getTime());
-      }
-
       dateFilter.clockIn = { $gte: firstDayOfMonth, $lte: lastDayOfMonth };
     } else if (period === "year") {
-      // Período: Ano atual
       const now = new Date();
       const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
       const lastDayOfYear = new Date(now.getFullYear(), 11, 31);
       lastDayOfYear.setHours(23, 59, 59, 999);
 
-      // Bloquear futuros
-      if (lastDayOfYear > now) {
-        lastDayOfYear.setTime(now.getTime());
-      }
-
       dateFilter.clockIn = { $gte: firstDayOfYear, $lte: lastDayOfYear };
     } else {
-      return res.status(400).json({
+      res.status(400).json({
         error:
           "O parâmetro 'period' deve ser 'day', 'week', 'month', 'year' ou incluir startDate e endDate.",
       });
+      return;
     }
 
     if (employeeId) {
@@ -99,7 +139,6 @@ export const getTimeRecords = async (req: Request, res: Response) => {
 
     console.log("Filtro aplicado:", dateFilter);
 
-    // Consultar registros no banco de dados
     const records = await TimeRecord.find(dateFilter);
     res.status(200).json(records);
   } catch (error) {

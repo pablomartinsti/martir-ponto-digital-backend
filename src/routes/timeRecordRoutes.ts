@@ -5,6 +5,7 @@ import {
   endLunch,
   clockOut,
   getTimeRecords,
+  calculateWorkHours,
 } from "../controllers/timeRecordController";
 
 const router = express.Router();
@@ -23,5 +24,8 @@ router.post("/clock-out", clockOut);
 
 // Rota para buscar registros de tempo
 router.get("/time-records", getTimeRecords);
+
+// Rota para calcular as horas trabalhadas
+router.get("/work-hours", calculateWorkHours);
 
 export default router;

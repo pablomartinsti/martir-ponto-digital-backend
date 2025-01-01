@@ -1,7 +1,6 @@
 import { query, Request, Response } from "express";
 import { Employee } from "../models/Employee";
 import { handleError } from "../utils/errorHandler";
-import { error } from "console";
 
 // Controlador para criar um funcionário
 export const createEmployee = async (req: Request, res: Response) => {
