@@ -5,27 +5,20 @@ import {
   endLunch,
   clockOut,
   getTimeRecords,
-  calculateWorkHours,
 } from "../controllers/timeRecordController";
+import { authenticate, authorize } from "../middlewares/authMiddleware";
 
 const router = express.Router();
 
-// Rota para registrar entrada
-router.post("/clock-in", clockIn);
-
-// Registrar saída para almoço
-router.post("/lunch-start", startLunch);
-
-// Registrar volta do almoço
-router.post("/lunch-end", endLunch);
-
-// Rota para registrar saída
-router.post("/clock-out", clockOut);
-
-// Rota para buscar registros de tempo
-router.get("/time-records", getTimeRecords);
-
-// Rota para calcular as horas trabalhadas
-router.get("/work-hours", calculateWorkHours);
+router.post("/clock-in", authenticate, authorize(["employee"]), clockIn);
+router.post("/lunch-start", authenticate, authorize(["employee"]), startLunch);
+router.post("/lunch-end", authenticate, authorize(["employee"]), endLunch);
+router.post("/clock-out", authenticate, authorize(["employee"]), clockOut);
+router.get(
+  "/time-records",
+  authenticate,
+  authorize(["employee", "admin"]),
+  getTimeRecords
+);
 
 export default router;

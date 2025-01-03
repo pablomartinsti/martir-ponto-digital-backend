@@ -1,9 +1,46 @@
-import { query, Request, Response } from "express";
+import { Request, Response } from "express";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
 import { Employee } from "../models/Employee";
-import { handleError } from "../utils/errorHandler";
+import { WorkSchedule } from "../models/WorkSchedule";
+import { TimeRecord } from "../models/TimeRecord";
+import {
+  handleError,
+  sendErrorResponse,
+  validateField,
+} from "../utils/errorHandler";
 
-// Controlador para criar um funcionário
-export const createEmployee = async (req: Request, res: Response) => {
+const SECRET_KEY = "sua_chave_secreta"; // Substitua por uma chave segura
+
+export const login = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { cpf, password } = req.body;
+    const employee = await Employee.findOne({ cpf });
+
+    if (!employee)
+      return sendErrorResponse(res, 404, "Funcionário não encontrado");
+
+    const isPasswordValid = await bcrypt.compare(password, employee.password);
+    if (!isPasswordValid) return sendErrorResponse(res, 401, "Senha inválida");
+
+    const token = jwt.sign(
+      { id: employee._id, role: employee.role },
+      SECRET_KEY,
+      {
+        expiresIn: "1y",
+      }
+    );
+
+    res.status(200).json({ token });
+  } catch (error) {
+    sendErrorResponse(res, 500, handleError(error));
+  }
+};
+
+export const createEmployee = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
     const { name, position, cpf, password } = req.body;
 
@@ -14,12 +51,11 @@ export const createEmployee = async (req: Request, res: Response) => {
       password,
       isActive: true,
     });
-    console.log(employee);
-    await employee.save();
 
+    await employee.save();
     res.status(201).json(employee);
   } catch (error) {
-    res.status(400).json({ error: handleError(error) });
+    sendErrorResponse(res, 400, handleError(error));
   }
 };
 
@@ -45,14 +81,15 @@ export const getEmployees = async (req: Request, res: Response) => {
   }
 };
 
-export const toggleEmployeeStatus = async (req: Request, res: Response) => {
+export const toggleEmployeeStatus = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
     const { id } = req.params;
     const { isActive } = req.body;
 
-    if (typeof isActive !== "boolean") {
-      res.status(400).json({ error: "O campo isActive deve ser um booleano" });
-    }
+    validateField(isActive, "boolean", "O campo isActive deve ser um booleano");
 
     const updatedEmployee = await Employee.findByIdAndUpdate(
       id,
@@ -60,17 +97,50 @@ export const toggleEmployeeStatus = async (req: Request, res: Response) => {
       { new: true }
     );
 
-    if (!updatedEmployee) {
-      res.status(404).json({ error: "funcionário não encontrado" });
-    }
+    if (!updatedEmployee)
+      return sendErrorResponse(res, 404, "Funcionário não encontrado");
 
     res.status(200).json({
-      message: `Status do funcionário atualizado com sucesso para ${
+      message: `Status do funcionário atualizado para ${
         isActive ? "ativo" : "inativo"
       }`,
       employee: updatedEmployee,
     });
   } catch (error) {
-    res.status(500).json({ error: handleError(error) });
+    sendErrorResponse(res, 500, handleError(error));
+  }
+};
+
+export const deleteEmployee = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    // Verificar se o funcionário existe
+    const employee = await Employee.findById(id);
+    if (!employee) {
+      res.status(404).json({ error: "Funcionário não encontrado" });
+      return;
+    }
+
+    // Excluir as escalas associadas ao funcionário
+    await WorkSchedule.deleteMany({ employeeId: id });
+
+    // Excluir os registros de ponto associados ao funcionário
+    await TimeRecord.deleteMany({ employeeId: id });
+
+    // Excluir o funcionário
+    await Employee.findByIdAndDelete(id);
+
+    res.status(200).json({
+      message: "Funcionário e registros associados excluídos com sucesso",
+    });
+  } catch (error) {
+    console.error("Erro ao excluir funcionário:", error);
+    res
+      .status(500)
+      .json({ error: "Erro ao excluir funcionário e seus registros" });
   }
 };

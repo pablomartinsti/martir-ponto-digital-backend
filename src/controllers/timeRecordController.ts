@@ -1,149 +1,70 @@
 import { Request, Response } from "express";
+import moment from "moment-timezone";
 import { TimeRecord } from "../models/TimeRecord";
 import { Employee } from "../models/Employee";
+import { getDateFilter } from "../utils/dateFilter";
+import { calculateWorkHours } from "../utils/workHoursCalculator";
+import { IWorkSchedule, WorkSchedule } from "../models/WorkSchedule";
 
-// calculo das Horas
-export const calculateWorkHours = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  try {
-    const { employeeId, startDate, endDate } = req.query;
-
-    let dateFilter: any = {};
-
-    if (startDate && endDate) {
-      const start = new Date(startDate as string);
-      const end = new Date(endDate as string);
-      end.setHours(23, 59, 59, 999);
-      dateFilter.clockIn = { $gte: start, $lte: end };
-    }
-
-    if (employeeId) {
-      dateFilter.employeeId = employeeId;
-    }
-
-    // Buscar registros no banco
-    const records = await TimeRecord.find(dateFilter);
-
-    // Calcular as horas trabalhadas para cada registro
-    const results = records.map((record) => {
-      const clockIn = record.clockIn ? new Date(record.clockIn) : null;
-      const clockOut = record.clockOut ? new Date(record.clockOut) : null;
-      const lunchStart = record.lunchStart ? new Date(record.lunchStart) : null;
-      const lunchEnd = record.lunchEnd ? new Date(record.lunchEnd) : null;
-
-      if (!clockIn || !clockOut) {
-        return {
-          record,
-          workHours: "Dados insuficientes para calcular horas trabalhadas.",
-        };
-      }
-
-      const totalWorkDuration = clockOut.getTime() - clockIn.getTime();
-      const lunchDuration =
-        lunchStart && lunchEnd ? lunchEnd.getTime() - lunchStart.getTime() : 0;
-
-      const workHours = totalWorkDuration - lunchDuration;
-
-      // Converter para horas e minutos
-      const hours = Math.floor(workHours / (1000 * 60 * 60));
-      const minutes = Math.floor((workHours % (1000 * 60 * 60)) / (1000 * 60));
-
-      return {
-        record,
-        workHours: `${hours}h ${minutes}m`,
-      };
-    });
-
-    res.status(200).json(results);
-  } catch (error) {
-    console.error("Erro ao calcular horas trabalhadas:", error);
-    res.status(500).json({ error: "Erro ao calcular horas trabalhadas." });
-  }
-};
-
-// Filtro por periodo
 export const getTimeRecords = async (
   req: Request,
   res: Response
 ): Promise<void> => {
   try {
-    const { employeeId, startDate, endDate, period } = req.query;
+    const { startDate, endDate, period } = req.query;
 
-    let dateFilter: any = {};
+    let dateFilter: { [key: string]: any } = getDateFilter(
+      startDate as string,
+      endDate as string,
+      period as string
+    );
 
-    console.log("Query recebida:", { employeeId, startDate, endDate, period });
-
-    const now = new Date();
-    now.setHours(23, 59, 59, 999); // Final do dia atual
-
-    // Filtros de data baseados em startDate e endDate
-    if (startDate && endDate) {
-      const start = new Date(startDate as string);
-      const end = new Date(endDate as string);
-      end.setHours(23, 59, 59, 999); // Ajustar endDate para incluir todo o último dia
-
-      // Bloquear períodos futuros
-      if (start > now || end > now) {
-        res.status(400).json({
-          error: "Não é permitido buscar dados para períodos futuros.",
-        });
-        return;
-      }
-
-      dateFilter.clockIn = { $gte: start, $lte: end };
-    } else if (period === "day") {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      const todayEnd = new Date();
-      todayEnd.setHours(23, 59, 59, 999);
-
-      dateFilter.clockIn = { $gte: todayStart, $lte: todayEnd };
-    } else if (period === "week") {
-      const today = new Date();
-      const firstDayOfWeek = new Date(
-        today.setDate(today.getDate() - today.getDay())
-      );
-      firstDayOfWeek.setHours(0, 0, 0, 0);
-      const lastDayOfWeek = new Date(firstDayOfWeek);
-      lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6);
-      lastDayOfWeek.setHours(23, 59, 59, 999);
-
-      dateFilter.clockIn = { $gte: firstDayOfWeek, $lte: lastDayOfWeek };
-    } else if (period === "month") {
-      const now = new Date();
-      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      lastDayOfMonth.setHours(23, 59, 59, 999);
-
-      dateFilter.clockIn = { $gte: firstDayOfMonth, $lte: lastDayOfMonth };
-    } else if (period === "year") {
-      const now = new Date();
-      const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
-      const lastDayOfYear = new Date(now.getFullYear(), 11, 31);
-      lastDayOfYear.setHours(23, 59, 59, 999);
-
-      dateFilter.clockIn = { $gte: firstDayOfYear, $lte: lastDayOfYear };
-    } else {
-      res.status(400).json({
-        error:
-          "O parâmetro 'period' deve ser 'day', 'week', 'month', 'year' ou incluir startDate e endDate.",
-      });
-      return;
+    // Restringir registros para funcionários
+    if ((req as any).user?.role === "employee") {
+      dateFilter["employeeId"] = (req as any).user.id;
     }
-
-    if (employeeId) {
-      dateFilter.employeeId = employeeId;
-    }
-
-    console.log("Filtro aplicado:", dateFilter);
 
     const records = await TimeRecord.find(dateFilter);
-    res.status(200).json(records);
+
+    const results = await Promise.all(
+      records.map(async (record) => {
+        const schedule = (await WorkSchedule.findOne({
+          employeeId: record.employeeId,
+        })) as IWorkSchedule | null;
+
+        // Ajustar `record.clockIn` para o fuso horário correto antes de calcular o dia
+        const localClockIn = moment
+          .tz(record.clockIn, "America/Sao_Paulo")
+          .format("dddd");
+
+        const dailyHours =
+          schedule?.customDays.find((day) => day.day === localClockIn)
+            ?.dailyHours ?? 8;
+
+        const calculation = calculateWorkHours(record, dailyHours);
+
+        // Converter horários para o fuso horário correto antes de retornar
+        return {
+          ...record.toObject(),
+          clockIn: moment.tz(record.clockIn, "America/Sao_Paulo").format(),
+          lunchStart: record.lunchStart
+            ? moment.tz(record.lunchStart, "America/Sao_Paulo").format()
+            : null,
+          lunchEnd: record.lunchEnd
+            ? moment.tz(record.lunchEnd, "America/Sao_Paulo").format()
+            : null,
+          clockOut: record.clockOut
+            ? moment.tz(record.clockOut, "America/Sao_Paulo").format()
+            : null,
+          ...calculation,
+        };
+      })
+    );
+
+    res.status(200).json(results);
   } catch (error) {
-    console.error("Erro no controlador getTimeRecords:", error);
-    res.status(500).json({ error: "Erro ao buscar registros de tempo" });
+    console.error("Erro ao buscar registros de tempo:", error);
+    res.status(500).json({ error: "Erro ao buscar registros de tempo." });
   }
 };
 
