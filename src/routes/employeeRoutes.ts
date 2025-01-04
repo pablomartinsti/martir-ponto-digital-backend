@@ -1,37 +1,37 @@
-import express from "express";
+import express from 'express';
 import {
   createEmployee,
   getEmployees,
   toggleEmployeeStatus,
   login,
   deleteEmployee,
-} from "../controllers/employeeController";
-import { authenticate, authorize } from "../middlewares/authMiddleware";
+} from '../controllers/employeeController';
+import { authenticate, authorize } from '../middlewares/authMiddleware';
 
 const router = express.Router();
 
 // Apenas admin pode criar funcionários
-router.post("/employees", authenticate, authorize(["admin"]), createEmployee);
+router.post('/employees', authenticate, authorize(['admin']), createEmployee);
 
 // Login não precisa de autenticação
-router.post("/login", login);
+router.post('/login', login);
 
 // Listar funcionários (apenas admin)
-router.get("/employees", authenticate, authorize(["admin"]), getEmployees);
+router.get('/employees', authenticate, authorize(['admin']), getEmployees);
 
 // Alterar status do funcionário (apenas admin)
 router.patch(
-  "/:id/status",
+  '/:id/status',
   authenticate,
-  authorize(["admin"]),
+  authorize(['admin']),
   toggleEmployeeStatus
 );
 
 // Excluir funcionário (apenas admin)
 router.delete(
-  "/employees/:id",
+  '/employees/:id',
   authenticate,
-  authorize(["admin"]),
+  authorize(['admin']),
   deleteEmployee
 );
 

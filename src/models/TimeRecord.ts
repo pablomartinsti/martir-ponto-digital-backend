@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from "mongoose";
+import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITimesRecord extends Document {
   employeeId: mongoose.Types.ObjectId;
@@ -13,18 +13,18 @@ export interface ITimesRecord extends Document {
 }
 
 const TimeRecordSchema: Schema = new Schema({
-  employeeId: { type: Schema.Types.ObjectId, ref: "Employee", require: true },
-  clockIn: { type: Date, require: true },
+  employeeId: { type: Schema.Types.ObjectId, ref: 'Employee', required: true },
+  clockIn: { type: Date, required: true },
   lunchStart: { type: Date },
   lunchEnd: { type: Date },
-  clockOut: { type: Date, require: true },
+  clockOut: { type: Date }, // Alterado para não obrigatório
   location: {
-    latitude: { type: Date, require: true },
-    longitude: { type: Date, require: true },
+    latitude: { type: Number, required: true }, // Corrigido para Number
+    longitude: { type: Number, required: true }, // Corrigido para Number
   },
 });
 
 export const TimeRecord = mongoose.model<ITimesRecord>(
-  "TimeRecord",
+  'TimeRecord',
   TimeRecordSchema
 );

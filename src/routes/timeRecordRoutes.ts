@@ -1,23 +1,23 @@
-import express from "express";
+import express from 'express';
 import {
   clockIn,
   startLunch,
   endLunch,
   clockOut,
   getTimeRecords,
-} from "../controllers/timeRecordController";
-import { authenticate, authorize } from "../middlewares/authMiddleware";
+} from '../controllers/timeRecordController';
+import { authenticate, authorize } from '../middlewares/authMiddleware';
 
 const router = express.Router();
 
-router.post("/clock-in", authenticate, authorize(["employee"]), clockIn);
-router.post("/lunch-start", authenticate, authorize(["employee"]), startLunch);
-router.post("/lunch-end", authenticate, authorize(["employee"]), endLunch);
-router.post("/clock-out", authenticate, authorize(["employee"]), clockOut);
+router.post('/clock-in', authenticate, authorize(['employee']), clockIn);
+router.post('/lunch-start', authenticate, authorize(['employee']), startLunch);
+router.post('/lunch-end', authenticate, authorize(['employee']), endLunch);
+router.post('/clock-out', authenticate, authorize(['employee']), clockOut);
 router.get(
-  "/time-records",
+  '/time-records',
   authenticate,
-  authorize(["employee", "admin"]),
+  authorize(['employee', 'admin']),
   getTimeRecords
 );
 

@@ -1,37 +1,37 @@
-import express from "express";
+import express from 'express';
 import {
   setWorkSchedule,
   getWorkSchedule,
   listWorkSchedules,
   deleteWorkSchedule,
-} from "../controllers/workScheduleController";
-import { authenticate, authorize } from "../middlewares/authMiddleware";
+} from '../controllers/workScheduleController';
+import { authenticate, authorize } from '../middlewares/authMiddleware';
 
 const router = express.Router();
 
 router.post(
-  "/work-schedules",
+  '/work-schedules',
   authenticate,
-  authorize(["admin"]),
+  authorize(['admin']),
   setWorkSchedule
 );
 router.get(
-  "/work-schedules/:employeeId",
+  '/work-schedules/:employeeId',
   authenticate,
-  authorize(["admin"]),
+  authorize(['admin']),
   getWorkSchedule
 );
 router.get(
-  "/work-schedules",
+  '/work-schedules',
   authenticate,
-  authorize(["admin"]),
+  authorize(['admin']),
   listWorkSchedules
 );
 
 router.delete(
-  "/work-schedule/:employeeId",
+  '/work-schedule/:employeeId',
   authenticate,
-  authorize(["admin"]),
+  authorize(['admin']),
   deleteWorkSchedule
 );
 

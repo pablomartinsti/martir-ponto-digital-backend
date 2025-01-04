@@ -1,14 +1,14 @@
-import mongoose from "mongoose";
-import app from "./app";
+import mongoose from 'mongoose';
+import app from './app';
 
-const MONGO_URI = "mongodb://localhost:27017/registro_horarios";
+const MONGO_URI = 'mongodb://localhost:27017/registro_horarios';
 
 const connectToDataBase = async () => {
   try {
     await mongoose.connect(MONGO_URI);
-    console.log("Conectado ao MongoDb");
+    console.log('Conectado ao MongoDb');
   } catch (err) {
-    console.error("Erro ao conectar ao MongoDB", err);
+    console.error('Erro ao conectar ao MongoDB', err);
     process.exit(1);
   }
 };

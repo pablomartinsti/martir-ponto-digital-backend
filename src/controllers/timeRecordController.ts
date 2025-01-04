@@ -1,10 +1,22 @@
-import { Request, Response } from "express";
-import moment from "moment-timezone";
-import { TimeRecord } from "../models/TimeRecord";
-import { Employee } from "../models/Employee";
-import { getDateFilter } from "../utils/dateFilter";
-import { calculateWorkHours } from "../utils/workHoursCalculator";
-import { IWorkSchedule, WorkSchedule } from "../models/WorkSchedule";
+import { Request, Response } from 'express';
+import moment from 'moment-timezone';
+import { TimeRecord } from '../models/TimeRecord';
+import { Employee } from '../models/Employee';
+import { WorkSchedule, IWorkSchedule } from '../models/WorkSchedule';
+import { getDateFilter } from '../utils/dateFilter';
+import { calculateWorkHours } from '../utils/workHoursCalculator';
+import { z } from 'zod';
+
+// Schemas de validação
+const recordIdSchema = z.object({
+  recordId: z.string().nonempty('O ID do registro é obrigatório.'),
+});
+
+const clockInSchema = z.object({
+  employeeId: z.string().nonempty('O ID do funcionário é obrigatório.'),
+  latitude: z.number(),
+  longitude: z.number(),
+});
 
 export const getTimeRecords = async (
   req: Request,
@@ -13,48 +25,47 @@ export const getTimeRecords = async (
   try {
     const { startDate, endDate, period } = req.query;
 
-    let dateFilter: { [key: string]: any } = getDateFilter(
+    const dateFilter: { [key: string]: any } = getDateFilter(
       startDate as string,
       endDate as string,
       period as string
     );
 
     // Restringir registros para funcionários
-    if ((req as any).user?.role === "employee") {
-      dateFilter["employeeId"] = (req as any).user.id;
+    if ((req as any).user?.role === 'employee') {
+      dateFilter['employeeId'] = (req as any).user.id;
     }
 
     const records = await TimeRecord.find(dateFilter);
 
     const results = await Promise.all(
       records.map(async (record) => {
-        const schedule = (await WorkSchedule.findOne({
+        const schedule = await WorkSchedule.findOne({
           employeeId: record.employeeId,
-        })) as IWorkSchedule | null;
+        });
 
-        // Ajustar `record.clockIn` para o fuso horário correto antes de calcular o dia
-        const localClockIn = moment
-          .tz(record.clockIn, "America/Sao_Paulo")
-          .format("dddd");
+        const workSchedule =
+          schedule?.customDays.reduce(
+            (acc, day) => {
+              acc[day.day.toLowerCase()] = day.dailyHours;
+              return acc;
+            },
+            {} as { [key: string]: number }
+          ) || {};
 
-        const dailyHours =
-          schedule?.customDays.find((day) => day.day === localClockIn)
-            ?.dailyHours ?? 8;
+        const calculation = calculateWorkHours(record, workSchedule);
 
-        const calculation = calculateWorkHours(record, dailyHours);
-
-        // Converter horários para o fuso horário correto antes de retornar
         return {
           ...record.toObject(),
-          clockIn: moment.tz(record.clockIn, "America/Sao_Paulo").format(),
+          clockIn: moment.tz(record.clockIn, 'America/Sao_Paulo').format(),
           lunchStart: record.lunchStart
-            ? moment.tz(record.lunchStart, "America/Sao_Paulo").format()
+            ? moment.tz(record.lunchStart, 'America/Sao_Paulo').format()
             : null,
           lunchEnd: record.lunchEnd
-            ? moment.tz(record.lunchEnd, "America/Sao_Paulo").format()
+            ? moment.tz(record.lunchEnd, 'America/Sao_Paulo').format()
             : null,
           clockOut: record.clockOut
-            ? moment.tz(record.clockOut, "America/Sao_Paulo").format()
+            ? moment.tz(record.clockOut, 'America/Sao_Paulo').format()
             : null,
           ...calculation,
         };
@@ -63,31 +74,30 @@ export const getTimeRecords = async (
 
     res.status(200).json(results);
   } catch (error) {
-    console.error("Erro ao buscar registros de tempo:", error);
-    res.status(500).json({ error: "Erro ao buscar registros de tempo." });
+    console.error('Erro ao buscar registros de tempo:', error);
+    res.status(500).json({ error: 'Erro ao buscar registros de tempo.' });
   }
 };
 
 // Registrar entrada (clock-in)
 export const clockIn = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { employeeId, latitude, longitude } = req.body;
+    const { employeeId, latitude, longitude } = clockInSchema.parse(req.body);
 
-    // Verificar se o funcionário existe
     const employee = await Employee.findById(employeeId);
     if (!employee) {
-      res.status(404).json({ error: "Funcionário não encontrado" });
+      res.status(404).json({ error: 'Funcionário não encontrado' });
+      return;
     }
 
-    // Validar localização
     const isInLocation = validateLocation(latitude, longitude);
     if (!isInLocation) {
       res.status(403).json({
-        error: "Você precisa estar na empresa para registrar o ponto",
+        error: 'Você precisa estar na empresa para registrar o ponto.',
       });
+      return;
     }
 
-    // Criar registro de entrada
     const timeRecord = new TimeRecord({
       employeeId,
       clockIn: new Date(),
@@ -97,74 +107,52 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
     await timeRecord.save();
     res.status(201).json(timeRecord);
   } catch (error) {
-    console.error("Erro no clock-in:", error);
-    res.status(400).json({ error: "Erro ao registrar entrada" });
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ errors: error.errors });
+    } else {
+      console.error('Erro no clock-in:', error);
+      res.status(500).json({ error: 'Erro ao registrar entrada.' });
+    }
   }
 };
 
-export const startLunch = async (
+// Atualizar horários de almoço e saída
+const updateTimeRecordField = async (
   req: Request,
-  res: Response
-): Promise<void> => {
+  res: Response,
+  field: 'lunchStart' | 'lunchEnd' | 'clockOut'
+) => {
   try {
-    const { recordId } = req.body;
+    const { recordId } = recordIdSchema.parse(req.body);
 
     const timeRecord = await TimeRecord.findById(recordId);
     if (!timeRecord) {
-      res.status(404).json({ error: "Registro de ponto não encontrado" });
+      res.status(404).json({ error: 'Registro de ponto não encontrado.' });
       return;
     }
 
-    timeRecord.lunchStart = new Date();
-    await timeRecord.save();
-    res.status(200).json(timeRecord);
-  } catch (error) {
-    console.error("Erro ao registrar saída para almoço:", error);
-    res.status(404).json({ error: "Erro ao registra saída pra almoço" });
-  }
-};
-
-export const endLunch = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { recordId } = req.body;
-
-    const timeRecord = await TimeRecord.findById(recordId);
-    if (!timeRecord) {
-      res.status(404).json({ error: "Registro de ponto não encontrado" });
-      return;
-    }
-
-    timeRecord.lunchEnd = new Date();
-    await timeRecord.save();
-    res.status(200).json(timeRecord);
-  } catch (error) {
-    console.error("Erro ao registrar saída para almoço:", error);
-    res.status(404).json({ error: "Erro ao registra saída pra almoço" });
-  }
-};
-
-// Registrar saída (clock-out)
-export const clockOut = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { recordId } = req.body;
-
-    // Encontrar registro de ponto
-    const timeRecord = await TimeRecord.findById(recordId);
-    if (!timeRecord) {
-      res.status(404).json({ error: "Registro de ponto não encontrado" });
-      return;
-    }
-
-    // Atualizar horário de saída
-    timeRecord.clockOut = new Date();
+    timeRecord[field] = new Date();
     await timeRecord.save();
 
     res.status(200).json(timeRecord);
   } catch (error) {
-    console.error("Erro no clock-out:", error);
-    res.status(400).json({ error: "Erro ao registrar saída" });
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ errors: error.errors });
+    } else {
+      console.error(`Erro ao atualizar ${field}:`, error);
+      res.status(500).json({ error: `Erro ao registrar ${field}.` });
+    }
   }
 };
+
+export const startLunch = (req: Request, res: Response): Promise<void> =>
+  updateTimeRecordField(req, res, 'lunchStart');
+
+export const endLunch = (req: Request, res: Response): Promise<void> =>
+  updateTimeRecordField(req, res, 'lunchEnd');
+
+export const clockOut = (req: Request, res: Response): Promise<void> =>
+  updateTimeRecordField(req, res, 'clockOut');
 
 // Validação de localização
 const validateLocation = (latitude: number, longitude: number): boolean => {
@@ -172,9 +160,8 @@ const validateLocation = (latitude: number, longitude: number): boolean => {
   const companyLongitude = -48.18867069723629;
   const maxDistance = 0.002; // ~222 metros
 
-  const isLatitudeInRange = Math.abs(latitude - companyLatitude) <= maxDistance;
-  const isLongitudeInRange =
-    Math.abs(longitude - companyLongitude) <= maxDistance;
-
-  return isLatitudeInRange && isLongitudeInRange;
+  return (
+    Math.abs(latitude - companyLatitude) <= maxDistance &&
+    Math.abs(longitude - companyLongitude) <= maxDistance
+  );
 };

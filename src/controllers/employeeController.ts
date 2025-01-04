@@ -1,83 +1,109 @@
-import { Request, Response } from "express";
-import jwt from "jsonwebtoken";
-import bcrypt from "bcrypt";
-import { Employee } from "../models/Employee";
-import { WorkSchedule } from "../models/WorkSchedule";
-import { TimeRecord } from "../models/TimeRecord";
+import { Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcrypt';
+import { Employee } from '../models/Employee';
+import { WorkSchedule } from '../models/WorkSchedule';
+import { TimeRecord } from '../models/TimeRecord';
+
 import {
-  handleError,
-  sendErrorResponse,
-  validateField,
-} from "../utils/errorHandler";
+  deleteEmployeeSchema,
+  employeeSchema,
+  filterEmployeesSchema,
+  loginSchema,
+  toggleStatusSchema,
+} from '../utils/validationSchemas';
+import { z } from 'zod';
 
-const SECRET_KEY = "sua_chave_secreta"; // Substitua por uma chave segura
+const SECRET_KEY = 'sua_chave_secreta'; // Substitua por uma chave segura
 
-export const login = async (req: Request, res: Response): Promise<void> => {
+export const createEmployee = async (req: Request, res: Response) => {
   try {
-    const { cpf, password } = req.body;
-    const employee = await Employee.findOne({ cpf });
+    const validatedData = employeeSchema.parse(req.body);
 
-    if (!employee)
-      return sendErrorResponse(res, 404, "Funcionário não encontrado");
+    // Hash da senha no controlador
+    const hashedPassword = await bcrypt.hash(validatedData.password, 10);
 
-    const isPasswordValid = await bcrypt.compare(password, employee.password);
-    if (!isPasswordValid) return sendErrorResponse(res, 401, "Senha inválida");
+    const employee = new Employee({
+      ...validatedData,
+      password: hashedPassword, // Salvar a senha hash
+    });
+
+    await employee.save();
+
+    res.status(201).json(employee);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ errors: error.errors });
+    } else {
+      console.error('Erro ao criar funcionário:', error);
+      res.status(500).json({ error: 'Erro ao criar funcionário.' });
+    }
+  }
+};
+
+export const login = async (req: Request, res: Response) => {
+  try {
+    const validatedData = loginSchema.parse(req.body);
+
+    const employee = await Employee.findOne({ cpf: validatedData.cpf });
+    if (!employee) {
+      res.status(404).json({ error: 'Funcionário não encontrado' });
+      return;
+    }
+
+    console.log('Senha informada:', validatedData.password);
+    console.log('Hash salvo no banco:', employee.password);
+
+    const isPasswordValid = await bcrypt.compare(
+      validatedData.password,
+      employee.password
+    );
+    console.log('Resultado da comparação:', isPasswordValid);
+
+    if (!isPasswordValid) {
+      res.status(401).json({ error: 'Senha inválida' });
+      return;
+    }
 
     const token = jwt.sign(
       { id: employee._id, role: employee.role },
       SECRET_KEY,
       {
-        expiresIn: "1y",
+        expiresIn: '1d',
       }
     );
 
     res.status(200).json({ token });
   } catch (error) {
-    sendErrorResponse(res, 500, handleError(error));
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ errors: error.errors });
+    } else {
+      console.error('Erro ao realizar login:', error);
+      res.status(500).json({ error: 'Erro ao realizar login.' });
+    }
   }
 };
 
-export const createEmployee = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  try {
-    const { name, position, cpf, password } = req.body;
-
-    const employee = new Employee({
-      name,
-      position,
-      cpf,
-      password,
-      isActive: true,
-    });
-
-    await employee.save();
-    res.status(201).json(employee);
-  } catch (error) {
-    sendErrorResponse(res, 400, handleError(error));
-  }
-};
-
-// Controlador para listar funcionários
 export const getEmployees = async (req: Request, res: Response) => {
   try {
-    const { filter } = req.query;
+    const { filter } = filterEmployeesSchema.parse(req.query);
 
     let query = {};
-
-    if (filter === "active") {
+    if (filter === 'active') {
       query = { isActive: true };
-    } else if (filter === "inactive") {
+    } else if (filter === 'inactive') {
       query = { isActive: false };
     }
-
-    console.log("Filtro aplicado:", query);
 
     const employees = await Employee.find(query, { password: 0 });
     res.status(200).json(employees);
   } catch (error) {
-    res.status(500).json({ error: handleError(error) });
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ errors: error.errors });
+    } else {
+      console.error('Erro ao listar funcionários:', error);
+      res.status(500).json({ error: 'Erro ao listar funcionários.' });
+    }
   }
 };
 
@@ -87,9 +113,7 @@ export const toggleEmployeeStatus = async (
 ): Promise<void> => {
   try {
     const { id } = req.params;
-    const { isActive } = req.body;
-
-    validateField(isActive, "boolean", "O campo isActive deve ser um booleano");
+    const { isActive } = toggleStatusSchema.parse(req.body);
 
     const updatedEmployee = await Employee.findByIdAndUpdate(
       id,
@@ -98,16 +122,21 @@ export const toggleEmployeeStatus = async (
     );
 
     if (!updatedEmployee)
-      return sendErrorResponse(res, 404, "Funcionário não encontrado");
+      res.status(404).json({ error: 'Funcionário não encontrado' });
 
     res.status(200).json({
       message: `Status do funcionário atualizado para ${
-        isActive ? "ativo" : "inativo"
+        isActive ? 'ativo' : 'inativo'
       }`,
       employee: updatedEmployee,
     });
   } catch (error) {
-    sendErrorResponse(res, 500, handleError(error));
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ errors: error.errors });
+    } else {
+      console.error('Erro ao atualizar status do funcionário:', error);
+      res.status(500).json({ error: 'Erro ao atualizar status.' });
+    }
   }
 };
 
@@ -116,31 +145,27 @@ export const deleteEmployee = async (
   res: Response
 ): Promise<void> => {
   try {
-    const { id } = req.params;
+    const { id } = deleteEmployeeSchema.parse(req.params);
 
-    // Verificar se o funcionário existe
     const employee = await Employee.findById(id);
     if (!employee) {
-      res.status(404).json({ error: "Funcionário não encontrado" });
+      res.status(404).json({ error: 'Funcionário não encontrado' });
       return;
     }
 
-    // Excluir as escalas associadas ao funcionário
     await WorkSchedule.deleteMany({ employeeId: id });
-
-    // Excluir os registros de ponto associados ao funcionário
     await TimeRecord.deleteMany({ employeeId: id });
-
-    // Excluir o funcionário
     await Employee.findByIdAndDelete(id);
 
     res.status(200).json({
-      message: "Funcionário e registros associados excluídos com sucesso",
+      message: 'Funcionário e registros associados excluídos com sucesso',
     });
   } catch (error) {
-    console.error("Erro ao excluir funcionário:", error);
-    res
-      .status(500)
-      .json({ error: "Erro ao excluir funcionário e seus registros" });
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ errors: error.errors });
+    } else {
+      console.error('Erro ao excluir funcionário:', error);
+      res.status(500).json({ error: 'Erro ao excluir funcionário.' });
+    }
   }
 };
