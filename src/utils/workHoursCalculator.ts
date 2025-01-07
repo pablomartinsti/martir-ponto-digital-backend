@@ -60,10 +60,10 @@ export const calculateWorkHours = (
   };
 
   // Determinar se é "horas extra" ou "horas falta"
-  const balanceLabel = balance >= 0 ? 'horas extra' : 'horas falta';
+  const balanceLabel = balance >= 0 ? '+' : '-';
 
   return {
     workedHours: formatTime(workedHours),
-    balance: `${formatTime(balance)} (${balanceLabel})`,
+    balance: `(${balanceLabel}) ${formatTime(balance)} `,
   };
 };
