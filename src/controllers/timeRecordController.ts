@@ -79,7 +79,6 @@ export const getTimeRecords = async (
   }
 };
 
-// Registrar entrada (clock-in)
 export const clockIn = async (req: Request, res: Response): Promise<void> => {
   try {
     const { employeeId, latitude, longitude } = clockInSchema.parse(req.body);
@@ -98,13 +97,31 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const timeRecord = new TimeRecord({
-      employeeId,
-      clockIn: new Date(),
-      location: { latitude, longitude },
-    });
+    const today = new Date().toISOString().split('T')[0];
 
-    await timeRecord.save();
+    // Verifica se já existe um registro para hoje com `clockIn`
+    const existingRecord = await TimeRecord.findOne({
+      employeeId,
+      date: today,
+    });
+    if (existingRecord?.clockIn) {
+      res.status(400).json({ error: 'Jornada já iniciada hoje.' });
+      return;
+    }
+
+    // Caso não exista um registro com `clockIn`, cria ou atualiza o registro
+    const timeRecord = await TimeRecord.findOneAndUpdate(
+      { employeeId, date: today }, // Busca pelo ID do funcionário e a data
+      {
+        $set: {
+          clockIn: new Date(),
+          location: { latitude, longitude },
+          date: today,
+        },
+      }, // Atualiza ou cria
+      { new: true, upsert: true } // Retorna o registro atualizado ou cria um novo
+    );
+
     res.status(201).json(timeRecord);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -116,12 +133,11 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-// Atualizar horários de almoço e saída
 const updateTimeRecordField = async (
   req: Request,
   res: Response,
   field: 'lunchStart' | 'lunchEnd' | 'clockOut'
-) => {
+): Promise<void> => {
   try {
     const { recordId } = recordIdSchema.parse(req.body);
 
@@ -131,6 +147,33 @@ const updateTimeRecordField = async (
       return;
     }
 
+    // Verificar se a ação já foi realizada
+    if (field === 'lunchStart' && timeRecord.lunchStart) {
+      res.status(400).json({ error: 'Saída para almoço já registrada hoje.' });
+      return;
+    }
+
+    if (field === 'lunchEnd') {
+      if (!timeRecord.lunchStart) {
+        res
+          .status(400)
+          .json({ error: 'Saída para almoço ainda não registrada.' });
+        return;
+      }
+      if (timeRecord.lunchEnd) {
+        res
+          .status(400)
+          .json({ error: 'Retorno do almoço já registrado hoje.' });
+        return;
+      }
+    }
+
+    if (field === 'clockOut' && timeRecord.clockOut) {
+      res.status(400).json({ error: 'Jornada já finalizada hoje.' });
+      return;
+    }
+
+    // Atualiza o campo correspondente
     timeRecord[field] = new Date();
     await timeRecord.save();
 

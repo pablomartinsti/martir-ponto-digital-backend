@@ -22,6 +22,7 @@ const TimeRecordSchema: Schema = new Schema({
     latitude: { type: Number, required: true }, // Corrigido para Number
     longitude: { type: Number, required: true }, // Corrigido para Number
   },
+  date: { type: String, required: true },
 });
 
 export const TimeRecord = mongoose.model<ITimesRecord>(

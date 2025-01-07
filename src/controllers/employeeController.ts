@@ -51,9 +51,6 @@ export const login = async (req: Request, res: Response) => {
       return;
     }
 
-    console.log('Senha informada:', validatedData.password);
-    console.log('Hash salvo no banco:', employee.password);
-
     const isPasswordValid = await bcrypt.compare(
       validatedData.password,
       employee.password
@@ -69,11 +66,18 @@ export const login = async (req: Request, res: Response) => {
       { id: employee._id, role: employee.role },
       SECRET_KEY,
       {
-        expiresIn: '1d',
+        expiresIn: '1y',
       }
     );
 
-    res.status(200).json({ token });
+    res.status(200).json({
+      token,
+      user: {
+        id: employee._id,
+        name: employee.name,
+        role: employee.role,
+      },
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ errors: error.errors });
