@@ -2,9 +2,12 @@ import { Request, Response } from 'express';
 import moment from 'moment-timezone';
 import { TimeRecord } from '../models/TimeRecord';
 import { Employee } from '../models/Employee';
-import { WorkSchedule, IWorkSchedule } from '../models/WorkSchedule';
+import { WorkSchedule } from '../models/WorkSchedule';
 import { getDateFilter } from '../utils/dateFilter';
-import { calculateWorkHours } from '../utils/workHoursCalculator';
+import {
+  calculateTotalHours,
+  calculateWorkHours,
+} from '../utils/workHoursCalculator';
 import { z } from 'zod';
 
 // Schemas de validação
@@ -37,6 +40,13 @@ export const getTimeRecords = async (
     }
 
     const records = await TimeRecord.find(dateFilter);
+
+    if (!records.length) {
+      res.status(404).json({
+        message: 'Nenhum registro encontrado no intervalo especificado.',
+      });
+      return; // ENCERRA a execução
+    }
 
     const results = await Promise.all(
       records.map(async (record) => {
@@ -72,10 +82,41 @@ export const getTimeRecords = async (
       })
     );
 
-    res.status(200).json(results);
+    const workSchedule = await WorkSchedule.findOne({
+      employeeId: records[0]?.employeeId,
+    });
+
+    if (!workSchedule || !workSchedule.customDays.length) {
+      res.status(404).json({ error: 'Escala de trabalho não encontrada.' });
+      return; // ENCERRA a execução
+    }
+
+    const schedule =
+      workSchedule?.customDays.reduce(
+        (acc, day) => {
+          acc[day.day.toLowerCase()] = day.dailyHours;
+          return acc;
+        },
+        {} as { [key: string]: number }
+      ) || {};
+
+    // Calcular o saldo mensal usando a nova função calculateTotalHours
+    const monthlyResult = calculateTotalHours(records, schedule);
+
+    console.log('Records:', records);
+    console.log('Schedule:', schedule);
+    console.log('Monthly Result:', monthlyResult);
+
+    // Retornar os resultados diários e o saldo mensal
+    res.status(200).json({
+      dailyResults: results, // Resultados diários
+      monthlyResult, // Resumo mensal
+    });
+    return; // ENCERRA a execução
   } catch (error) {
     console.error('Erro ao buscar registros de tempo:', error);
     res.status(500).json({ error: 'Erro ao buscar registros de tempo.' });
+    return; // ENCERRA a execução
   }
 };
 
@@ -123,6 +164,7 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
     );
 
     res.status(201).json(timeRecord);
+    return;
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ errors: error.errors });
