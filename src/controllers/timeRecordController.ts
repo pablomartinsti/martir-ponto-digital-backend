@@ -1,13 +1,7 @@
 import { Request, Response } from 'express';
-import moment from 'moment-timezone';
+import { getAggregatedTimeRecords } from '../utils/timeRecordAggregation';
 import { TimeRecord } from '../models/TimeRecord';
 import { Employee } from '../models/Employee';
-import { WorkSchedule } from '../models/WorkSchedule';
-import { getDateFilter } from '../utils/dateFilter';
-import {
-  calculateTotalHours,
-  calculateWorkHours,
-} from '../utils/workHoursCalculator';
 import { z } from 'zod';
 
 // Schemas de validação
@@ -21,102 +15,29 @@ const clockInSchema = z.object({
   longitude: z.number(),
 });
 
-export const getTimeRecords = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
+export const getTimeRecords = async (req: Request, res: Response) => {
   try {
     const { startDate, endDate, period } = req.query;
 
-    const dateFilter: { [key: string]: any } = getDateFilter(
+    const employeeId = (req as any).user.id;
+
+    const records = await getAggregatedTimeRecords(
+      employeeId,
       startDate as string,
       endDate as string,
-      period as string
+      period as 'day' | 'week' | 'month' | 'year'
     );
 
-    // Restringir registros para funcionários
-    if ((req as any).user?.role === 'employee') {
-      dateFilter['employeeId'] = (req as any).user.id;
+    // ✅ Verifica se há registros na propriedade `results`
+    if (!records.results || records.results.length === 0) {
+      res.status(404).json({ message: 'Nenhum registro encontrado.' });
+      return;
     }
 
-    const records = await TimeRecord.find(dateFilter);
-
-    if (!records.length) {
-      res.status(404).json({
-        message: 'Nenhum registro encontrado no intervalo especificado.',
-      });
-      return; // ENCERRA a execução
-    }
-
-    const results = await Promise.all(
-      records.map(async (record) => {
-        const schedule = await WorkSchedule.findOne({
-          employeeId: record.employeeId,
-        });
-
-        const workSchedule =
-          schedule?.customDays.reduce(
-            (acc, day) => {
-              acc[day.day.toLowerCase()] = day.dailyHours;
-              return acc;
-            },
-            {} as { [key: string]: number }
-          ) || {};
-
-        const calculation = calculateWorkHours(record, workSchedule);
-
-        return {
-          ...record.toObject(),
-          clockIn: moment.tz(record.clockIn, 'America/Sao_Paulo').format(),
-          lunchStart: record.lunchStart
-            ? moment.tz(record.lunchStart, 'America/Sao_Paulo').format()
-            : null,
-          lunchEnd: record.lunchEnd
-            ? moment.tz(record.lunchEnd, 'America/Sao_Paulo').format()
-            : null,
-          clockOut: record.clockOut
-            ? moment.tz(record.clockOut, 'America/Sao_Paulo').format()
-            : null,
-          ...calculation,
-        };
-      })
-    );
-
-    const workSchedule = await WorkSchedule.findOne({
-      employeeId: records[0]?.employeeId,
-    });
-
-    if (!workSchedule || !workSchedule.customDays.length) {
-      res.status(404).json({ error: 'Escala de trabalho não encontrada.' });
-      return; // ENCERRA a execução
-    }
-
-    const schedule =
-      workSchedule?.customDays.reduce(
-        (acc, day) => {
-          acc[day.day.toLowerCase()] = day.dailyHours;
-          return acc;
-        },
-        {} as { [key: string]: number }
-      ) || {};
-
-    // Calcular o saldo mensal usando a nova função calculateTotalHours
-    const monthlyResult = calculateTotalHours(records, schedule);
-
-    console.log('Records:', records);
-    console.log('Schedule:', schedule);
-    console.log('Monthly Result:', monthlyResult);
-
-    // Retornar os resultados diários e o saldo mensal
-    res.status(200).json({
-      dailyResults: results, // Resultados diários
-      monthlyResult, // Resumo mensal
-    });
-    return; // ENCERRA a execução
+    res.status(200).json(records);
   } catch (error) {
-    console.error('Erro ao buscar registros de tempo:', error);
-    res.status(500).json({ error: 'Erro ao buscar registros de tempo.' });
-    return; // ENCERRA a execução
+    console.error('Erro ao buscar registros:', error);
+    res.status(500).json({ error: 'Erro interno ao buscar registros.' });
   }
 };
 
