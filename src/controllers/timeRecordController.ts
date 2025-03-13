@@ -21,6 +21,13 @@ export const getTimeRecords = async (req: Request, res: Response) => {
 
     const employeeId = (req as any).user.id;
 
+    console.log('📌 Parâmetros recebidos:', {
+      startDate,
+      endDate,
+      period,
+      employeeId,
+    });
+
     const records = await getAggregatedTimeRecords(
       employeeId,
       startDate as string,

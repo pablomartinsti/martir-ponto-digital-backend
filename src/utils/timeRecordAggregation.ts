@@ -1,18 +1,7 @@
 import { TimeRecord } from '../models/TimeRecord';
 import { WorkSchedule } from '../models/WorkSchedule';
 import mongoose from 'mongoose';
-import dayjs from 'dayjs';
-import utc from 'dayjs/plugin/utc';
-import timezone from 'dayjs/plugin/timezone';
 
-dayjs.extend(utc);
-dayjs.extend(timezone);
-
-const TIMEZONE = 'America/Sao_Paulo';
-
-/**
- * Formata um número decimal de horas para o formato `hh:mm`
- */
 const formatHours = (decimalHours: number): string => {
   const hours = Math.floor(decimalHours);
   const minutes = Math.round((decimalHours - hours) * 60);
@@ -21,21 +10,17 @@ const formatHours = (decimalHours: number): string => {
     .padStart(2, '0')}`;
 };
 
-/**
- * Converte a data para o formato correto no fuso horário do Brasil
- */
-const formatDate = (date: Date): string => {
-  return dayjs(date).tz(TIMEZONE).format('DD/MM/YYYY HH:mm');
-};
-
 export const getAggregatedTimeRecords = async (
   employeeId: string,
   startDate: string,
   endDate: string,
   period: 'day' | 'week' | 'month' | 'year'
 ) => {
-  const start = dayjs(startDate).tz(TIMEZONE).startOf('day').toDate();
-  const end = dayjs(endDate).tz(TIMEZONE).endOf('day').toDate();
+  const start = new Date(startDate);
+  start.setHours(0, 0, 0, 0); // Define início do dia
+
+  const end = new Date(endDate);
+  end.setHours(23, 59, 59, 999); // Define fim do dia
 
   // 🔎 Buscar escala do funcionário
   const schedule = await WorkSchedule.findOne({ employeeId });
@@ -56,7 +41,11 @@ export const getAggregatedTimeRecords = async (
   const matchStage = {
     $match: {
       employeeId: new mongoose.Types.ObjectId(employeeId),
-      clockIn: { $gte: start, $lte: end },
+      clockIn: {
+        $exists: true,
+        $gte: new Date(`${startDate}T00:00:00.000Z`), // ✅ Busca a partir da data inicial
+        $lte: new Date(`${endDate}T23:59:59.999Z`), // ✅ Inclui a data final
+      },
     },
   };
 
@@ -119,26 +108,47 @@ export const getAggregatedTimeRecords = async (
       break;
 
     case 'week':
+      groupStage = {
+        $group: {
+          _id: {
+            week: { $isoWeek: '$clockIn' }, // Agrupar por semana ISO
+            year: { $isoWeekYear: '$clockIn' },
+          },
+          records: {
+            $push: {
+              _id: '$_id',
+              clockIn: '$clockIn',
+              lunchStart: '$lunchStart',
+              lunchEnd: '$lunchEnd',
+              clockOut: '$clockOut',
+              location: '$location',
+              workedHours: {
+                $divide: ['$workedMilliseconds', 3600000],
+              },
+            },
+          },
+        },
+      };
+      break;
+
     case 'month':
+      groupStage = {
+        $group: {
+          _id: {
+            month: { $month: '$clockIn' },
+            year: { $year: '$clockIn' },
+          },
+          records: { $push: '$$ROOT' },
+        },
+      };
+      break;
+
     case 'year':
       groupStage = {
         $group: {
-          _id:
-            period === 'week'
-              ? {
-                  week: { $isoWeek: '$clockIn' },
-                  year: { $isoWeekYear: '$clockIn' },
-                }
-              : period === 'month'
-                ? {
-                    day: { $dayOfMonth: '$clockIn' },
-                    month: { $month: '$clockIn' },
-                    year: { $year: '$clockIn' },
-                  }
-                : {
-                    year: { $year: '$clockIn' },
-                    month: { $month: '$clockIn' },
-                  },
+          _id: {
+            year: { $year: '$clockIn' },
+          },
           records: { $push: '$$ROOT' },
         },
       };
@@ -149,7 +159,7 @@ export const getAggregatedTimeRecords = async (
   }
 
   const sortStage = {
-    $sort: { 'period.year': 1, 'period.month': 1, 'period.day': 1 },
+    $sort: { '_id.year': 1, '_id.week': 1 },
   };
 
   // ✅ **Correção: cálculo do saldo no backend**
@@ -165,35 +175,37 @@ export const getAggregatedTimeRecords = async (
   let totalNegativeHours = 0;
 
   const updatedResults = aggregationResults.map((result: any) => {
-    let dayPositiveHours = 0;
-    let dayNegativeHours = 0;
+    let weekPositiveHours = 0;
+    let weekNegativeHours = 0;
 
     const updatedRecords = result.records.map((record: any) => {
-      const dayOfWeek = dayjs(record.clockIn).format('dddd').toLowerCase();
+      const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'long' })
+        .format(new Date(record.clockIn))
+        .toLowerCase();
       const expectedHours = scheduleHoursPerDay[dayOfWeek] || 0;
       const workedHours = record.workedHours;
       const balance = workedHours - expectedHours;
 
       if (balance > 0) {
-        dayPositiveHours += balance;
+        weekPositiveHours += balance;
       } else {
-        dayNegativeHours += Math.abs(balance);
+        weekNegativeHours += Math.abs(balance);
       }
 
       return {
         _id: record._id,
-        clockIn: formatDate(record.clockIn), // 📅 Ajustado para fuso horário Brasil
-        lunchStart: formatDate(record.lunchStart), // 📅 Ajustado para fuso horário Brasil
-        lunchEnd: formatDate(record.lunchEnd), // 📅 Ajustado para fuso horário Brasil
-        clockOut: formatDate(record.clockOut), // 📅 Ajustado para fuso horário Brasil
+        clockIn: record.clockIn ? record.clockIn.toISOString() : null,
+        lunchStart: record.lunchStart ? record.lunchStart.toISOString() : null,
+        lunchEnd: record.lunchEnd ? record.lunchEnd.toISOString() : null,
+        clockOut: record.clockOut ? record.clockOut.toISOString() : null,
         location: record.location,
-        workedHours: formatHours(workedHours), // ⏳ Convertendo para `hh:mm`
-        balance: formatHours(balance), // ⏳ Convertendo para `hh:mm`
+        workedHours: formatHours(workedHours),
+        balance: formatHours(balance),
       };
     });
 
-    totalPositiveHours += dayPositiveHours;
-    totalNegativeHours += dayNegativeHours;
+    totalPositiveHours += weekPositiveHours;
+    totalNegativeHours += weekNegativeHours;
 
     return {
       _id: result._id,
