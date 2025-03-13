@@ -2,10 +2,12 @@ import { TimeRecord } from '../models/TimeRecord';
 import { WorkSchedule } from '../models/WorkSchedule';
 import mongoose from 'mongoose';
 
+// ✅ Converte decimal para "HH:mm"
 const formatHours = (decimalHours: number): string => {
-  const hours = Math.floor(decimalHours);
-  const minutes = Math.round((decimalHours - hours) * 60);
-  return `${hours.toString().padStart(2, '0')}:${minutes
+  if (isNaN(decimalHours)) return '00:00';
+  const hours = Math.floor(Math.abs(decimalHours));
+  const minutes = Math.round((Math.abs(decimalHours) - hours) * 60);
+  return `${decimalHours < 0 ? '-' : ''}${hours.toString().padStart(2, '0')}:${minutes
     .toString()
     .padStart(2, '0')}`;
 };
@@ -17,19 +19,16 @@ export const getAggregatedTimeRecords = async (
   period: 'day' | 'week' | 'month' | 'year'
 ) => {
   const start = new Date(startDate);
-  start.setHours(0, 0, 0, 0); // Define início do dia
-
+  start.setHours(0, 0, 0, 0);
   const end = new Date(endDate);
-  end.setHours(23, 59, 59, 999); // Define fim do dia
+  end.setHours(23, 59, 59, 999);
 
-  // 🔎 Buscar escala do funcionário
   const schedule = await WorkSchedule.findOne({ employeeId });
 
   if (!schedule) {
     throw new Error('Escala de trabalho não encontrada.');
   }
 
-  // 📅 Estruturando escala do funcionário por dia da semana
   const scheduleHoursPerDay = schedule.customDays.reduce(
     (acc, day) => {
       acc[day.day.toLowerCase()] = day.dailyHours;
@@ -38,139 +37,72 @@ export const getAggregatedTimeRecords = async (
     {} as { [key: string]: number }
   );
 
-  const matchStage = {
-    $match: {
-      employeeId: new mongoose.Types.ObjectId(employeeId),
-      clockIn: {
-        $exists: true,
-        $gte: new Date(`${startDate}T00:00:00.000Z`), // ✅ Busca a partir da data inicial
-        $lte: new Date(`${endDate}T23:59:59.999Z`), // ✅ Inclui a data final
-      },
-    },
-  };
-
-  const addFieldsStage = {
-    $addFields: {
-      totalWorkedMilliseconds: {
-        $subtract: [{ $ifNull: ['$clockOut', new Date()] }, '$clockIn'],
-      },
-      lunchBreakMilliseconds: {
-        $cond: {
-          if: { $and: ['$lunchStart', '$lunchEnd'] },
-          then: { $subtract: ['$lunchEnd', '$lunchStart'] },
-          else: 0,
-        },
-      },
-      workedMilliseconds: {
-        $subtract: [
-          {
-            $subtract: [{ $ifNull: ['$clockOut', new Date()] }, '$clockIn'],
-          },
-          {
-            $cond: {
-              if: { $and: ['$lunchStart', '$lunchEnd'] },
-              then: { $subtract: ['$lunchEnd', '$lunchStart'] },
-              else: 0,
-            },
-          },
-        ],
-      },
-    },
-  };
-
-  let groupStage: any;
-
-  switch (period) {
-    case 'day':
-      groupStage = {
-        $group: {
-          _id: {
-            day: { $dayOfMonth: '$clockIn' },
-            month: { $month: '$clockIn' },
-            year: { $year: '$clockIn' },
-            dayOfWeek: { $dayOfWeek: '$clockIn' },
-          },
-          records: {
-            $push: {
-              _id: '$_id',
-              clockIn: '$clockIn',
-              lunchStart: '$lunchStart',
-              lunchEnd: '$lunchEnd',
-              clockOut: '$clockOut',
-              location: '$location',
-              workedHours: {
-                $divide: ['$workedMilliseconds', 3600000], // Convertendo para horas decimais
-              },
-            },
-          },
-        },
-      };
-      break;
-
-    case 'week':
-      groupStage = {
-        $group: {
-          _id: {
-            week: { $isoWeek: '$clockIn' }, // Agrupar por semana ISO
-            year: { $isoWeekYear: '$clockIn' },
-          },
-          records: {
-            $push: {
-              _id: '$_id',
-              clockIn: '$clockIn',
-              lunchStart: '$lunchStart',
-              lunchEnd: '$lunchEnd',
-              clockOut: '$clockOut',
-              location: '$location',
-              workedHours: {
-                $divide: ['$workedMilliseconds', 3600000],
-              },
-            },
-          },
-        },
-      };
-      break;
-
-    case 'month':
-      groupStage = {
-        $group: {
-          _id: {
-            month: { $month: '$clockIn' },
-            year: { $year: '$clockIn' },
-          },
-          records: { $push: '$$ROOT' },
-        },
-      };
-      break;
-
-    case 'year':
-      groupStage = {
-        $group: {
-          _id: {
-            year: { $year: '$clockIn' },
-          },
-          records: { $push: '$$ROOT' },
-        },
-      };
-      break;
-
-    default:
-      throw new Error('Período inválido.');
-  }
-
-  const sortStage = {
-    $sort: { '_id.year': 1, '_id.week': 1 },
-  };
-
-  // ✅ **Correção: cálculo do saldo no backend**
   const aggregationResults = await TimeRecord.aggregate([
-    matchStage,
-    addFieldsStage,
-    groupStage,
-    sortStage,
+    {
+      $match: {
+        employeeId: new mongoose.Types.ObjectId(employeeId),
+        date: { $gte: startDate, $lte: endDate }, // ✅ Usa 'date' em vez de 'clockIn'
+      },
+    },
+    {
+      $addFields: {
+        totalWorkedMilliseconds: {
+          $subtract: [{ $ifNull: ['$clockOut', new Date()] }, '$clockIn'],
+        },
+        lunchBreakMilliseconds: {
+          $cond: {
+            if: { $and: ['$lunchStart', '$lunchEnd'] },
+            then: { $subtract: ['$lunchEnd', '$lunchStart'] },
+            else: 0,
+          },
+        },
+        workedMilliseconds: {
+          $subtract: [
+            {
+              $subtract: [{ $ifNull: ['$clockOut', new Date()] }, '$clockIn'],
+            },
+            {
+              $cond: {
+                if: { $and: ['$lunchStart', '$lunchEnd'] },
+                then: { $subtract: ['$lunchEnd', '$lunchStart'] },
+                else: 0,
+              },
+            },
+          ],
+        },
+      },
+    },
+    {
+      $group: {
+        _id:
+          period === 'month'
+            ? { month: { $month: '$clockIn' }, year: { $year: '$clockIn' } }
+            : period === 'week'
+              ? {
+                  week: { $isoWeek: '$clockIn' },
+                  year: { $isoWeekYear: '$clockIn' },
+                }
+              : {
+                  day: { $dayOfMonth: '$clockIn' },
+                  month: { $month: '$clockIn' },
+                  year: { $year: '$clockIn' },
+                },
+        records: {
+          $push: {
+            _id: '$_id',
+            clockIn: '$clockIn',
+            lunchStart: '$lunchStart',
+            lunchEnd: '$lunchEnd',
+            clockOut: '$clockOut',
+            location: '$location',
+            workedHours: { $divide: ['$workedMilliseconds', 3600000] }, // Convertendo milissegundos para horas decimais
+          },
+        },
+      },
+    },
+    { $sort: { '_id.year': 1, '_id.week': 1 } },
   ]);
 
-  // ✅ **Cálculo dos totais**
   let totalPositiveHours = 0;
   let totalNegativeHours = 0;
 
@@ -182,8 +114,9 @@ export const getAggregatedTimeRecords = async (
       const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'long' })
         .format(new Date(record.clockIn))
         .toLowerCase();
+
       const expectedHours = scheduleHoursPerDay[dayOfWeek] || 0;
-      const workedHours = record.workedHours;
+      const workedHours = isNaN(record.workedHours) ? 0 : record.workedHours;
       const balance = workedHours - expectedHours;
 
       if (balance > 0) {
@@ -199,8 +132,8 @@ export const getAggregatedTimeRecords = async (
         lunchEnd: record.lunchEnd ? record.lunchEnd.toISOString() : null,
         clockOut: record.clockOut ? record.clockOut.toISOString() : null,
         location: record.location,
-        workedHours: formatHours(workedHours),
-        balance: formatHours(balance),
+        workedHours: formatHours(workedHours), // ✅ Agora "HH:mm"
+        balance: formatHours(balance), // ✅ Agora "HH:mm"
       };
     });
 
@@ -213,7 +146,6 @@ export const getAggregatedTimeRecords = async (
     };
   });
 
-  // 📊 **Cálculo final do saldo do período**
   const finalBalance = totalPositiveHours - totalNegativeHours;
 
   return {
@@ -223,8 +155,8 @@ export const getAggregatedTimeRecords = async (
       type: period,
     },
     results: updatedResults,
-    totalPositiveHours: formatHours(totalPositiveHours), // ⏳ Convertendo para `hh:mm`
-    totalNegativeHours: formatHours(totalNegativeHours), // ⏳ Convertendo para `hh:mm`
-    finalBalance: formatHours(finalBalance), // ⏳ Convertendo para `hh:mm`
+    totalPositiveHours: formatHours(totalPositiveHours), // ✅ Agora "HH:mm"
+    totalNegativeHours: formatHours(totalNegativeHours), // ✅ Agora "HH:mm"
+    finalBalance: formatHours(finalBalance), // ✅ Agora "HH:mm"
   };
 };
