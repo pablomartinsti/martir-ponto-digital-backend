@@ -2,14 +2,20 @@ import { TimeRecord } from '../models/TimeRecord';
 import { WorkSchedule } from '../models/WorkSchedule';
 import mongoose from 'mongoose';
 
-// ✅ Converte decimal para "HH:mm"
 const formatHours = (decimalHours: number): string => {
-  if (isNaN(decimalHours)) return '00:00';
-  const hours = Math.floor(Math.abs(decimalHours));
-  const minutes = Math.round((Math.abs(decimalHours) - hours) * 60);
-  return `${decimalHours < 0 ? '-' : ''}${hours.toString().padStart(2, '0')}:${minutes
+  if (isNaN(decimalHours)) return '00:00:00';
+
+  const isNegative = decimalHours < 0;
+  const totalSeconds = Math.abs(Math.round(decimalHours * 3600));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const formattedTime = `${hours.toString().padStart(2, '0')}:${minutes
     .toString()
-    .padStart(2, '0')}`;
+    .padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+  return isNegative ? `-${formattedTime}` : formattedTime;
 };
 
 export const getAggregatedTimeRecords = async (
@@ -75,38 +81,79 @@ export const getAggregatedTimeRecords = async (
     {
       $group: {
         _id:
-          period === 'month'
-            ? { month: { $month: '$clockIn' }, year: { $year: '$clockIn' } }
-            : period === 'week'
-              ? {
-                  week: { $isoWeek: '$clockIn' },
-                  year: { $isoWeekYear: '$clockIn' },
-                }
-              : {
-                  day: { $dayOfMonth: '$clockIn' },
-                  month: { $month: '$clockIn' },
-                  year: { $year: '$clockIn' },
+          period === 'year'
+            ? { year: { $year: '$clockIn' }, month: { $month: '$clockIn' } }
+            : period === 'month'
+              ? { month: { $month: '$clockIn' }, year: { $year: '$clockIn' } }
+              : period === 'week'
+                ? {
+                    week: { $isoWeek: '$clockIn' },
+                    year: { $isoWeekYear: '$clockIn' },
+                  }
+                : {
+                    day: { $dayOfMonth: '$clockIn' },
+                    month: { $month: '$clockIn' },
+                    year: { $year: '$clockIn' },
+                  },
+
+        ...(period === 'year'
+          ? { totalWorkedMilliseconds: { $sum: '$workedMilliseconds' } } // ✅ Para "year", somamos todas as horas do mês
+          : {
+              records: {
+                $push: {
+                  _id: '$_id',
+                  clockIn: '$clockIn',
+                  lunchStart: '$lunchStart',
+                  lunchEnd: '$lunchEnd',
+                  clockOut: '$clockOut',
+                  location: '$location',
+                  workedHours: { $divide: ['$workedMilliseconds', 3600000] }, // ✅ Para "day", "week" e "month", mantém os registros
                 },
-        records: {
-          $push: {
-            _id: '$_id',
-            clockIn: '$clockIn',
-            lunchStart: '$lunchStart',
-            lunchEnd: '$lunchEnd',
-            clockOut: '$clockOut',
-            location: '$location',
-            workedHours: { $divide: ['$workedMilliseconds', 3600000] }, // Convertendo milissegundos para horas decimais
-          },
-        },
+              },
+            }),
       },
     },
-    { $sort: { '_id.year': 1, '_id.week': 1 } },
+    {
+      $sort: { '_id.year': 1, '_id.month': 1 }, // ✅ Ordena os meses na ordem crescente
+    },
   ]);
 
   let totalPositiveHours = 0;
   let totalNegativeHours = 0;
 
   const updatedResults = aggregationResults.map((result: any) => {
+    if (period === 'year') {
+      const year = result._id.year;
+      const month = result._id.month;
+
+      let expectedHoursInMonth = 0;
+      let workedHours = result.totalWorkedMilliseconds / (1000 * 60 * 60);
+
+      for (let day = 1; day <= 31; day++) {
+        const date = new Date(year, month - 1, day);
+        if (date.getMonth() + 1 !== month) break;
+
+        const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'long' })
+          .format(date)
+          .toLowerCase();
+
+        expectedHoursInMonth += scheduleHoursPerDay[dayOfWeek] || 0;
+      }
+
+      const balance = workedHours - expectedHoursInMonth;
+      totalPositiveHours += Math.max(balance, 0);
+      totalNegativeHours += Math.max(-balance, 0);
+
+      return {
+        _id: result._id,
+        totalWorkedHours: formatHours(workedHours),
+        expectedHours: formatHours(expectedHoursInMonth),
+        totalPositiveHours: formatHours(Math.max(balance, 0)),
+        totalNegativeHours: formatHours(Math.max(-balance, 0)),
+        finalBalance: formatHours(balance),
+      };
+    }
+
     let weekPositiveHours = 0;
     let weekNegativeHours = 0;
 
@@ -132,8 +179,8 @@ export const getAggregatedTimeRecords = async (
         lunchEnd: record.lunchEnd ? record.lunchEnd.toISOString() : null,
         clockOut: record.clockOut ? record.clockOut.toISOString() : null,
         location: record.location,
-        workedHours: formatHours(workedHours), // ✅ Agora "HH:mm"
-        balance: formatHours(balance), // ✅ Agora "HH:mm"
+        workedHours: formatHours(workedHours),
+        balance: formatHours(balance),
       };
     });
 
@@ -155,8 +202,8 @@ export const getAggregatedTimeRecords = async (
       type: period,
     },
     results: updatedResults,
-    totalPositiveHours: formatHours(totalPositiveHours), // ✅ Agora "HH:mm"
-    totalNegativeHours: formatHours(totalNegativeHours), // ✅ Agora "HH:mm"
-    finalBalance: formatHours(finalBalance), // ✅ Agora "HH:mm"
+    totalPositiveHours: formatHours(totalPositiveHours),
+    totalNegativeHours: formatHours(totalNegativeHours),
+    finalBalance: formatHours(finalBalance),
   };
 };
