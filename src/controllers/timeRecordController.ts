@@ -17,34 +17,39 @@ const clockInSchema = z.object({
 
 export const getTimeRecords = async (req: Request, res: Response) => {
   try {
-    const { startDate, endDate, period } = req.query;
+    const { startDate, endDate, period, employeeId } = req.query;
 
-    const employeeId = (req as any).user.id;
+    const requisitadoPor = (req as any).user.id;
+    const tipo = (req as any).user.role;
+
+    // Se for admin, usa o employeeId da query. Senão, usa o ID do próprio usuário
+    const employeeIdConsultado =
+      tipo === 'admin' && employeeId ? employeeId : requisitadoPor;
 
     console.log('📌 Parâmetros recebidos:', {
       startDate,
       endDate,
       period,
-      employeeId,
+      requisitadoPor,
+      tipo,
+      employeeIdConsultado,
     });
 
     const records = await getAggregatedTimeRecords(
-      employeeId,
+      employeeIdConsultado,
       startDate as string,
       endDate as string,
       period as 'day' | 'week' | 'month' | 'year'
     );
 
-    // ✅ Verifica se há registros na propriedade `results`
     if (!records.results || records.results.length === 0) {
-      res.status(404).json({ message: 'Nenhum registro encontrado.' });
-      return;
+      return res.status(404).json({ message: 'Nenhum registro encontrado.' });
     }
 
-    res.status(200).json(records);
+    return res.status(200).json(records);
   } catch (error) {
     console.error('Erro ao buscar registros:', error);
-    res.status(500).json({ error: 'Erro interno ao buscar registros.' });
+    return res.status(500).json({ error: 'Erro interno ao buscar registros.' });
   }
 };
 
