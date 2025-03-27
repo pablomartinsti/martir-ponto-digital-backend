@@ -15,25 +15,15 @@ const clockInSchema = z.object({
   longitude: z.number(),
 });
 
-export const getTimeRecords = async (req: Request, res: Response) => {
+export const getTimeRecords = async (req: any, res: any) => {
   try {
     const { startDate, endDate, period, employeeId } = req.query;
 
     const requisitadoPor = (req as any).user.id;
     const tipo = (req as any).user.role;
 
-    // Se for admin, usa o employeeId da query. Senão, usa o ID do próprio usuário
     const employeeIdConsultado =
       tipo === 'admin' && employeeId ? employeeId : requisitadoPor;
-
-    console.log('📌 Parâmetros recebidos:', {
-      startDate,
-      endDate,
-      period,
-      requisitadoPor,
-      tipo,
-      employeeIdConsultado,
-    });
 
     const records = await getAggregatedTimeRecords(
       employeeIdConsultado,
@@ -46,10 +36,10 @@ export const getTimeRecords = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Nenhum registro encontrado.' });
     }
 
-    return res.status(200).json(records);
+    res.status(200).json(records);
   } catch (error) {
     console.error('Erro ao buscar registros:', error);
-    return res.status(500).json({ error: 'Erro interno ao buscar registros.' });
+    res.status(500).json({ error: 'Erro interno ao buscar registros.' });
   }
 };
 

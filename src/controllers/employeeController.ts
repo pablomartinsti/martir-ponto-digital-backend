@@ -14,7 +14,7 @@ import {
 } from '../utils/validationSchemas';
 import { z } from 'zod';
 
-const SECRET_KEY = 'sua_chave_secreta'; // Substitua por uma chave segura
+const SECRET_KEY = process.env.JWT_SECRET!;
 
 export const createEmployee = async (req: Request, res: Response) => {
   try {

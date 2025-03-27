@@ -1,7 +1,10 @@
+import 'dotenv/config';
 import mongoose from 'mongoose';
 import app from './app';
 
-const MONGO_URI = 'mongodb://localhost:27017/registro_horarios';
+// Lê do arquivo .env
+const MONGO_URI = process.env.MONGO_URI as string;
+const PORT = process.env.PORT || 3000;
 
 const connectToDataBase = async () => {
   try {
@@ -14,7 +17,6 @@ const connectToDataBase = async () => {
 };
 
 const startServer = () => {
-  const PORT = 3000;
   app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
   });

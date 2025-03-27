@@ -1,5 +1,4 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import bcrypt from 'bcrypt';
 
 export interface IEmployee extends Document {
   name: string;
