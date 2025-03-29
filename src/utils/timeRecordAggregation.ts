@@ -180,14 +180,6 @@ export const getAggregatedTimeRecords = async (
       const workedHours = isNaN(record.workedHours) ? 0 : record.workedHours;
       const balance = workedHours - expectedHours;
 
-      console.log('------ REGISTRO ------');
-      console.log('Dia da Semana:', dayOfWeek);
-      console.log('Data local (Brasil):', dateInBrazil.toISOString());
-      console.log('Carga esperada:', expectedHours);
-      console.log('Horas trabalhadas:', workedHours);
-      console.log('Saldo calculado:', balance);
-      console.log('----------------------');
-
       if (balance > 0) {
         weekPositiveHours += balance;
       } else {
