@@ -47,11 +47,14 @@ export const getAggregatedTimeRecords = async (
     {
       $match: {
         employeeId: new mongoose.Types.ObjectId(employeeId),
-        date: { $gte: startDate, $lte: endDate }, // ✅ Usa 'date' em vez de 'clockIn'
+        date: { $gte: startDate, $lte: endDate },
       },
     },
     {
       $addFields: {
+        clockInLocal: {
+          $subtract: ['$clockIn', 1000 * 60 * 60 * 3], // Ajuste para UTC-3
+        },
         totalWorkedMilliseconds: {
           $subtract: [{ $ifNull: ['$clockOut', new Date()] }, '$clockIn'],
         },
@@ -82,22 +85,27 @@ export const getAggregatedTimeRecords = async (
       $group: {
         _id:
           period === 'year'
-            ? { year: { $year: '$clockIn' }, month: { $month: '$clockIn' } }
+            ? {
+                year: { $year: '$clockInLocal' },
+                month: { $month: '$clockInLocal' },
+              }
             : period === 'month'
-              ? { month: { $month: '$clockIn' }, year: { $year: '$clockIn' } }
+              ? {
+                  month: { $month: '$clockInLocal' },
+                  year: { $year: '$clockInLocal' },
+                }
               : period === 'week'
                 ? {
-                    week: { $isoWeek: '$clockIn' },
-                    year: { $isoWeekYear: '$clockIn' },
+                    week: { $isoWeek: '$clockInLocal' },
+                    year: { $isoWeekYear: '$clockInLocal' },
                   }
                 : {
-                    day: { $dayOfMonth: '$clockIn' },
-                    month: { $month: '$clockIn' },
-                    year: { $year: '$clockIn' },
+                    day: { $dayOfMonth: '$clockInLocal' },
+                    month: { $month: '$clockInLocal' },
+                    year: { $year: '$clockInLocal' },
                   },
-
         ...(period === 'year'
-          ? { totalWorkedMilliseconds: { $sum: '$workedMilliseconds' } } // ✅ Para "year", somamos todas as horas do mês
+          ? { totalWorkedMilliseconds: { $sum: '$workedMilliseconds' } }
           : {
               records: {
                 $push: {
@@ -107,14 +115,14 @@ export const getAggregatedTimeRecords = async (
                   lunchEnd: '$lunchEnd',
                   clockOut: '$clockOut',
                   location: '$location',
-                  workedHours: { $divide: ['$workedMilliseconds', 3600000] }, // ✅ Para "day", "week" e "month", mantém os registros
+                  workedHours: { $divide: ['$workedMilliseconds', 3600000] },
                 },
               },
             }),
       },
     },
     {
-      $sort: { '_id.year': 1, '_id.month': 1 }, // ✅ Ordena os meses na ordem crescente
+      $sort: { '_id.year': 1, '_id.month': 1 },
     },
   ]);
 
