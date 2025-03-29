@@ -110,6 +110,7 @@ export const getAggregatedTimeRecords = async (
               records: {
                 $push: {
                   _id: '$_id',
+                  date: '$date',
                   clockIn: '$clockIn',
                   lunchStart: '$lunchStart',
                   lunchEnd: '$lunchEnd',
@@ -166,13 +167,26 @@ export const getAggregatedTimeRecords = async (
     let weekNegativeHours = 0;
 
     const updatedRecords = result.records.map((record: any) => {
+      // Corrige o clockIn para o horário do Brasil (UTC-3)
+      const dateInBrazil = new Date(`${record.date}T00:00:00-03:00`);
+
+      // Pega o dia da semana com base no horário do Brasil
       const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'long' })
-        .format(new Date(record.clockIn))
+        .format(dateInBrazil)
         .toLowerCase();
 
+      // Busca a carga horária esperada com base na escala do funcionário
       const expectedHours = scheduleHoursPerDay[dayOfWeek] || 0;
       const workedHours = isNaN(record.workedHours) ? 0 : record.workedHours;
       const balance = workedHours - expectedHours;
+
+      console.log('------ REGISTRO ------');
+      console.log('Dia da Semana:', dayOfWeek);
+      console.log('Data local (Brasil):', dateInBrazil.toISOString());
+      console.log('Carga esperada:', expectedHours);
+      console.log('Horas trabalhadas:', workedHours);
+      console.log('Saldo calculado:', balance);
+      console.log('----------------------');
 
       if (balance > 0) {
         weekPositiveHours += balance;

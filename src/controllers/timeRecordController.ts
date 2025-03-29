@@ -61,13 +61,16 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const localDate = new Date(now.getTime() - 3 * 60 * 60 * 1000); // Ajusta para horário do Brasil
+    const today = localDate.toISOString().split('T')[0];
 
-    // Verifica se já existe um registro para hoje com `clockIn`
+    // Verifica se já existe um registro para o "dia local"
     const existingRecord = await TimeRecord.findOne({
       employeeId,
       date: today,
     });
+
     if (existingRecord?.clockIn) {
       res.status(400).json({ error: 'Jornada já iniciada hoje.' });
       return;
