@@ -22,7 +22,10 @@ interface CustomUser {
   companyId?: string;
 }
 
-export const createEmployee = async (req: Request, res: Response) => {
+export const createEmployee = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
     const validatedData = employeeSchema.parse(req.body);
 
@@ -36,19 +39,16 @@ export const createEmployee = async (req: Request, res: Response) => {
         res
           .status(400)
           .json({ error: 'O campo companyId é obrigatório para admin.' });
-        return;
       }
     } else if (requester?.role === 'sub_admin') {
       companyId = requester.companyId;
     } else {
       res.status(403).json({ error: 'Permissão negada.' });
-      return;
     }
 
     const existing = await Employee.findOne({ cpf: validatedData.cpf });
     if (existing) {
       res.status(400).json({ error: 'CPF já cadastrado.' });
-      return;
     }
 
     const hashedPassword = await bcrypt.hash(validatedData.password, 10);
@@ -62,33 +62,30 @@ export const createEmployee = async (req: Request, res: Response) => {
     await employee.save();
 
     res.status(201).json(employee);
-    return;
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ errors: error.errors });
-      return;
     } else {
       console.error('Erro ao criar funcionário:', error);
       res.status(500).json({ error: 'Erro ao criar funcionário.' });
-      return;
     }
   }
 };
 
-export const login = async (req: Request, res: Response) => {
+export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const validatedData = loginSchema.parse(req.body);
 
     const employee = await Employee.findOne({ cpf: validatedData.cpf });
     if (!employee) {
-      return res.status(404).json({ error: 'Funcionário não encontrado' });
+      res.status(404).json({ error: 'Funcionário não encontrado' });
+      return; // 👈 Faltava esse aqui
     }
 
     // ✅ Bloqueia login de funcionário inativo
     if (!employee.isActive) {
-      return res
-        .status(403)
-        .json({ error: 'Funcionário desativado. Acesso negado.' });
+      res.status(403).json({ error: 'Funcionário desativado. Acesso negado.' });
+      return;
     }
 
     const isPasswordValid = await bcrypt.compare(
@@ -97,7 +94,8 @@ export const login = async (req: Request, res: Response) => {
     );
 
     if (!isPasswordValid) {
-      return res.status(401).json({ error: 'Senha inválida' });
+      res.status(401).json({ error: 'Senha inválida' });
+      return;
     }
 
     const token = jwt.sign(
@@ -110,7 +108,7 @@ export const login = async (req: Request, res: Response) => {
       { expiresIn: '1d' }
     );
 
-    return res.status(200).json({
+    res.status(200).json({
       token,
       user: {
         id: employee._id,
@@ -120,20 +118,26 @@ export const login = async (req: Request, res: Response) => {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ errors: error.errors });
+      res.status(400).json({ errors: error.errors });
+      return;
     }
 
     console.error('Erro ao realizar login:', error);
-    return res.status(500).json({ error: 'Erro ao realizar login.' });
+    res.status(500).json({ error: 'Erro ao realizar login.' });
+    return;
   }
 };
 
-export const getEmployees = async (req: Request, res: Response) => {
+export const getEmployees = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
     const requester = (req as Request & { user?: CustomUser }).user;
 
     if (!requester) {
-      return res.status(401).json({ error: 'Usuário não autenticado.' });
+      res.status(401).json({ error: 'Usuário não autenticado.' });
+      return; // 👈 importante!
     }
 
     const { filter } = filterEmployeesSchema.parse(req.query);
@@ -158,9 +162,10 @@ export const getEmployees = async (req: Request, res: Response) => {
       const company = await Company.findOne({ cnpj: req.query.cnpj });
 
       if (!company) {
-        return res
+        res
           .status(404)
           .json({ error: 'Empresa não encontrada com este CNPJ.' });
+        return; // 👈 aqui também!
       }
 
       query.companyId = company._id;
@@ -171,23 +176,30 @@ export const getEmployees = async (req: Request, res: Response) => {
       'name cnpj'
     );
 
-    return res.status(200).json(employees);
+    res.status(200).json(employees);
+    return; // 👈 opcional, mas ajuda a clareza
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ errors: error.errors });
+      res.status(400).json({ errors: error.errors });
+      return;
     }
 
     console.error('Erro ao listar funcionários:', error);
-    return res.status(500).json({ error: 'Erro ao listar funcionários.' });
+    res.status(500).json({ error: 'Erro ao listar funcionários.' });
+    return;
   }
 };
 
-export const toggleEmployeeStatus = async (req: Request, res: Response) => {
+export const toggleEmployeeStatus = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
     const requester = (req as Request & { user?: CustomUser }).user;
 
     if (!requester) {
-      return res.status(401).json({ error: 'Usuário não autenticado.' });
+      res.status(401).json({ error: 'Usuário não autenticado.' });
+      return;
     }
 
     const { id } = req.params;
@@ -196,7 +208,8 @@ export const toggleEmployeeStatus = async (req: Request, res: Response) => {
     const employee = await Employee.findById(id);
 
     if (!employee) {
-      return res.status(404).json({ error: 'Funcionário não encontrado.' });
+      res.status(404).json({ error: 'Funcionário não encontrado.' });
+      return;
     }
 
     // 🔐 sub_admin só pode mudar status de funcionários da própria empresa
@@ -204,9 +217,10 @@ export const toggleEmployeeStatus = async (req: Request, res: Response) => {
       requester.role === 'sub_admin' &&
       String(employee.companyId) !== requester.companyId
     ) {
-      return res.status(403).json({
+      res.status(403).json({
         error: 'Permissão negada para alterar funcionários de outra empresa.',
       });
+      return;
     }
 
     const updatedEmployee = await Employee.findByIdAndUpdate(
@@ -223,30 +237,35 @@ export const toggleEmployeeStatus = async (req: Request, res: Response) => {
       );
     }
 
-    return res.status(200).json({
+    res.status(200).json({
       message: `Status do funcionário atualizado para ${
         isActive ? 'ativo' : 'inativo'
       }`,
       employee: updatedEmployee,
     });
+    return;
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ errors: error.errors });
+      res.status(400).json({ errors: error.errors });
+      return;
     } else {
       console.error('Erro ao atualizar status do funcionário:', error);
-      return res.status(500).json({ error: 'Erro ao atualizar status.' });
+      res.status(500).json({ error: 'Erro ao atualizar status.' });
+      return;
     }
   }
 };
 
-export const deleteEmployee = async (req: Request, res: Response) => {
+export const deleteEmployee = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
     const { id } = deleteEmployeeSchema.parse(req.params);
 
     const employee = await Employee.findById(id);
     if (!employee) {
       res.status(404).json({ error: 'Funcionário não encontrado' });
-      return;
     }
 
     await WorkSchedule.deleteMany({ employeeId: id });

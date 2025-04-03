@@ -49,11 +49,9 @@ export const getTimeRecords = async (req: Request, res: Response) => {
       const employee = await Employee.findById(employeeId);
 
       if (!employee || String(employee.companyId) !== user.companyId) {
-        res
-          .status(403)
-          .json({
-            error: 'Permissão negada. Funcionário não pertence à sua empresa.',
-          });
+        res.status(403).json({
+          error: 'Permissão negada. Funcionário não pertence à sua empresa.',
+        });
         return;
       }
 

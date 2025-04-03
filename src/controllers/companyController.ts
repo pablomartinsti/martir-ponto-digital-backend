@@ -102,12 +102,12 @@ export const createSubAdmin = async (
 export const getAllCompanies = async (
   req: AuthenticatedRequest,
   res: Response
-) => {
+): Promise<void> => {
   try {
     const user = req.user as CustomUser;
 
     if (user.role !== 'admin') {
-      return res.status(403).json({
+      res.status(403).json({
         error:
           'Acesso negado. Apenas administradores podem visualizar as empresas.',
       });
@@ -115,9 +115,9 @@ export const getAllCompanies = async (
 
     // ✅ Inclui o cnpj no retorno
     const companies = await Company.find({}, '_id name cnpj');
-    return res.status(200).json(companies);
+    res.status(200).json(companies);
   } catch (error) {
     console.error('Erro ao buscar empresas:', error);
-    return res.status(500).json({ error: 'Erro ao buscar empresas.' });
+    res.status(500).json({ error: 'Erro ao buscar empresas.' });
   }
 };
