@@ -1,28 +1,32 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt, { JwtPayload } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 
 const SECRET_KEY = process.env.JWT_SECRET!;
+interface AuthenticatedRequest extends Request {
+  user?: {
+    id: string;
+    role: 'admin' | 'sub_admin' | 'employee';
+    companyId?: string;
+  };
+}
 
 export const authenticate = (
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): void => {
   const token = req.header('Authorization')?.replace('Bearer ', '');
-
   if (!token) {
     res.status(401).json({ error: 'Acesso não autorizado' });
     return;
   }
 
   try {
-    const decoded = jwt.verify(token, SECRET_KEY) as JwtPayload & {
-      id: string;
-      role: string;
-    };
-
-    (req as any).user = decoded;
-
+    const decoded = jwt.verify(
+      token,
+      SECRET_KEY
+    ) as AuthenticatedRequest['user'];
+    req.user = decoded;
     next();
   } catch (error) {
     res.status(401).json({ error: 'Token inválido' });

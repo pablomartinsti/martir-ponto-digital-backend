@@ -16,27 +16,61 @@ import { z } from 'zod';
 
 const SECRET_KEY = process.env.JWT_SECRET!;
 
+interface CustomUser {
+  id: string;
+  role: 'admin' | 'sub_admin' | 'employee';
+  companyId?: string;
+}
+
 export const createEmployee = async (req: Request, res: Response) => {
   try {
     const validatedData = employeeSchema.parse(req.body);
 
-    // Hash da senha no controlador
+    const requester = (req as Request & { user?: CustomUser }).user;
+
+    let companyId;
+
+    if (requester?.role === 'admin') {
+      companyId = (req.body as any).companyId;
+      if (!companyId) {
+        res
+          .status(400)
+          .json({ error: 'O campo companyId é obrigatório para admin.' });
+        return;
+      }
+    } else if (requester?.role === 'sub_admin') {
+      companyId = requester.companyId;
+    } else {
+      res.status(403).json({ error: 'Permissão negada.' });
+      return;
+    }
+
+    const existing = await Employee.findOne({ cpf: validatedData.cpf });
+    if (existing) {
+      res.status(400).json({ error: 'CPF já cadastrado.' });
+      return;
+    }
+
     const hashedPassword = await bcrypt.hash(validatedData.password, 10);
 
     const employee = new Employee({
       ...validatedData,
-      password: hashedPassword, // Salvar a senha hash
+      password: hashedPassword,
+      companyId,
     });
 
     await employee.save();
 
     res.status(201).json(employee);
+    return;
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ errors: error.errors });
+      return;
     } else {
       console.error('Erro ao criar funcionário:', error);
       res.status(500).json({ error: 'Erro ao criar funcionário.' });
+      return;
     }
   }
 };
@@ -47,30 +81,36 @@ export const login = async (req: Request, res: Response) => {
 
     const employee = await Employee.findOne({ cpf: validatedData.cpf });
     if (!employee) {
-      res.status(404).json({ error: 'Funcionário não encontrado' });
-      return;
+      return res.status(404).json({ error: 'Funcionário não encontrado' });
+    }
+
+    // ✅ Bloqueia login de funcionário inativo
+    if (!employee.isActive) {
+      return res
+        .status(403)
+        .json({ error: 'Funcionário desativado. Acesso negado.' });
     }
 
     const isPasswordValid = await bcrypt.compare(
       validatedData.password,
       employee.password
     );
-    console.log('Resultado da comparação:', isPasswordValid);
 
     if (!isPasswordValid) {
-      res.status(401).json({ error: 'Senha inválida' });
-      return;
+      return res.status(401).json({ error: 'Senha inválida' });
     }
 
     const token = jwt.sign(
-      { id: employee._id, role: employee.role },
-      SECRET_KEY,
       {
-        expiresIn: '1y',
-      }
+        id: employee._id,
+        role: employee.role,
+        companyId: employee.companyId,
+      },
+      SECRET_KEY,
+      { expiresIn: '1d' }
     );
 
-    res.status(200).json({
+    return res.status(200).json({
       token,
       user: {
         id: employee._id,
@@ -80,44 +120,94 @@ export const login = async (req: Request, res: Response) => {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ errors: error.errors });
-    } else {
-      console.error('Erro ao realizar login:', error);
-      res.status(500).json({ error: 'Erro ao realizar login.' });
+      return res.status(400).json({ errors: error.errors });
     }
+
+    console.error('Erro ao realizar login:', error);
+    return res.status(500).json({ error: 'Erro ao realizar login.' });
   }
 };
 
 export const getEmployees = async (req: Request, res: Response) => {
   try {
+    const requester = (req as Request & { user?: CustomUser }).user;
+
+    if (!requester) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
     const { filter } = filterEmployeesSchema.parse(req.query);
 
-    let query = {};
+    const query: any = {};
+
+    // Filtro por status
     if (filter === 'active') {
-      query = { isActive: true };
+      query.isActive = true;
     } else if (filter === 'inactive') {
-      query = { isActive: false };
+      query.isActive = false;
     }
 
-    const employees = await Employee.find(query, { password: 0 });
-    res.status(200).json(employees);
+    // Sub admin só vê funcionários da sua empresa
+    if (requester.role === 'sub_admin') {
+      query.companyId = requester.companyId;
+    }
+
+    // Admin pode filtrar por cnpj
+    if (requester.role === 'admin' && req.query.cnpj) {
+      const { Company } = await import('../models/Company');
+      const company = await Company.findOne({ cnpj: req.query.cnpj });
+
+      if (!company) {
+        return res
+          .status(404)
+          .json({ error: 'Empresa não encontrada com este CNPJ.' });
+      }
+
+      query.companyId = company._id;
+    }
+
+    const employees = await Employee.find(query, { password: 0 }).populate(
+      'companyId',
+      'name cnpj'
+    );
+
+    return res.status(200).json(employees);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ errors: error.errors });
-    } else {
-      console.error('Erro ao listar funcionários:', error);
-      res.status(500).json({ error: 'Erro ao listar funcionários.' });
+      return res.status(400).json({ errors: error.errors });
     }
+
+    console.error('Erro ao listar funcionários:', error);
+    return res.status(500).json({ error: 'Erro ao listar funcionários.' });
   }
 };
 
-export const toggleEmployeeStatus = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
+export const toggleEmployeeStatus = async (req: Request, res: Response) => {
   try {
+    const requester = (req as Request & { user?: CustomUser }).user;
+
+    if (!requester) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
     const { id } = req.params;
     const { isActive } = toggleStatusSchema.parse(req.body);
+
+    const employee = await Employee.findById(id);
+
+    if (!employee) {
+      return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    }
+
+    // 🔐 sub_admin só pode mudar status de funcionários da própria empresa
+    if (
+      requester.role === 'sub_admin' &&
+      String(employee.companyId) !== requester.companyId
+    ) {
+      return res.status(403).json({
+        error: 'Permissão negada para alterar funcionários de outra empresa.',
+      });
+    }
 
     const updatedEmployee = await Employee.findByIdAndUpdate(
       id,
@@ -125,10 +215,15 @@ export const toggleEmployeeStatus = async (
       { new: true }
     );
 
-    if (!updatedEmployee)
-      res.status(404).json({ error: 'Funcionário não encontrado' });
+    // ✅ Se o funcionário for um sub_admin sendo desativado, desativa todos da empresa dele
+    if (updatedEmployee?.role === 'sub_admin' && isActive === false) {
+      await Employee.updateMany(
+        { companyId: updatedEmployee.companyId, role: 'employee' },
+        { isActive: false }
+      );
+    }
 
-    res.status(200).json({
+    return res.status(200).json({
       message: `Status do funcionário atualizado para ${
         isActive ? 'ativo' : 'inativo'
       }`,
@@ -136,18 +231,15 @@ export const toggleEmployeeStatus = async (
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ errors: error.errors });
+      return res.status(400).json({ errors: error.errors });
     } else {
       console.error('Erro ao atualizar status do funcionário:', error);
-      res.status(500).json({ error: 'Erro ao atualizar status.' });
+      return res.status(500).json({ error: 'Erro ao atualizar status.' });
     }
   }
 };
 
-export const deleteEmployee = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
+export const deleteEmployee = async (req: Request, res: Response) => {
   try {
     const { id } = deleteEmployeeSchema.parse(req.params);
 

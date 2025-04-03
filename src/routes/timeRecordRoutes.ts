@@ -17,7 +17,7 @@ router.post('/clock-out', authenticate, authorize(['employee']), clockOut);
 router.get(
   '/time-records',
   authenticate,
-  authorize(['employee', 'admin']),
+  authorize(['employee', 'admin', 'sub_admin']),
   getTimeRecords
 );
 

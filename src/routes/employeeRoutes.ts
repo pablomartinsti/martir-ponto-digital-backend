@@ -10,20 +10,30 @@ import { authenticate, authorize } from '../middlewares/authMiddleware';
 
 const router = express.Router();
 
-// Apenas admin pode criar funcionários
-router.post('/employees', authenticate, authorize(['admin']), createEmployee);
-
 // Login não precisa de autenticação
 router.post('/login', login);
 
-// Listar funcionários (apenas admin)
-router.get('/employees', authenticate, authorize(['admin']), getEmployees);
-
-// Alterar status do funcionário (apenas admin)
-router.patch(
-  '/:id/status',
+// Apenas admin e sub_admin podem criar funcionários
+router.post(
+  '/employees',
   authenticate,
-  authorize(['admin']),
+  authorize(['admin', 'sub_admin']),
+  createEmployee
+);
+
+// Listar funcionários (admin e sub_admin com acesso limitado)
+router.get(
+  '/employees',
+  authenticate,
+  authorize(['admin', 'sub_admin']),
+  getEmployees
+);
+
+// Alterar status do funcionário (apenas admin e sub_admin)
+router.patch(
+  '/employees/:id/status',
+  authenticate,
+  authorize(['admin', 'sub_admin']),
   toggleEmployeeStatus
 );
 

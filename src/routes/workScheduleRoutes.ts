@@ -12,19 +12,19 @@ const router = express.Router();
 router.post(
   '/work-schedules',
   authenticate,
-  authorize(['admin']),
+  authorize(['admin', 'sub_admin']),
   setWorkSchedule
 );
 router.get(
   '/work-schedules/:employeeId',
   authenticate,
-  authorize(['admin']),
+  authorize(['admin', 'sub_admin']),
   getWorkSchedule
 );
 router.get(
   '/work-schedules',
   authenticate,
-  authorize(['admin']),
+  authorize(['admin', 'sub_admin']),
   listWorkSchedules
 );
 

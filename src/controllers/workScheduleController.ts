@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { WorkSchedule } from '../models/WorkSchedule';
 import { z } from 'zod';
+import { Employee } from '../models/Employee';
 
 // Schema de validação para customDays
 const customDaySchema = z.object({
@@ -21,15 +22,43 @@ const workScheduleSchema = z.object({
   customDays: z.array(customDaySchema),
 });
 
+interface CustomRequest extends Request {
+  user?: {
+    id: string;
+    role: 'admin' | 'sub_admin' | 'employee';
+    companyId?: string;
+  };
+}
+
 // Criar ou atualizar escala de trabalho
 export const setWorkSchedule = async (
-  req: Request,
+  req: CustomRequest,
   res: Response
 ): Promise<void> => {
   try {
-    const validatedData = workScheduleSchema.parse(req.body);
+    const { employeeId, customDays } = workScheduleSchema.parse(req.body);
 
-    const { employeeId, customDays } = validatedData;
+    const requester = req.user as {
+      id: string;
+      role: 'admin' | 'sub_admin';
+      companyId?: string;
+    };
+
+    if (requester.role === 'sub_admin') {
+      const employee = await Employee.findById(employeeId);
+
+      if (!employee) {
+        res.status(404).json({ error: 'Funcionário não encontrado.' });
+        return;
+      }
+
+      if (String(employee.companyId) !== String(requester.companyId)) {
+        res.status(403).json({
+          error: 'Você só pode gerenciar funcionários da sua empresa.',
+        });
+        return;
+      }
+    }
 
     const existingSchedule = await WorkSchedule.findOne({ employeeId });
 
@@ -41,10 +70,7 @@ export const setWorkSchedule = async (
         schedule: existingSchedule,
       });
     } else {
-      const newSchedule = new WorkSchedule({
-        employeeId,
-        customDays,
-      });
+      const newSchedule = new WorkSchedule({ employeeId, customDays });
       await newSchedule.save();
       res.status(201).json({
         message: 'Escala criada com sucesso.',
@@ -63,11 +89,30 @@ export const setWorkSchedule = async (
 
 // Buscar escala de um funcionário
 export const getWorkSchedule = async (
-  req: Request,
+  req: CustomRequest,
   res: Response
 ): Promise<void> => {
   try {
     const { employeeId } = req.params;
+    const requester = req.user!;
+
+    // Busca o funcionário para verificar se ele pertence à empresa do sub_admin
+    const employee = await Employee.findById(employeeId);
+    if (!employee) {
+      res.status(404).json({ error: 'Funcionário não encontrado.' });
+      return;
+    }
+
+    // Verifica se o sub_admin está tentando acessar funcionário de outra empresa
+    if (
+      requester.role === 'sub_admin' &&
+      String(employee.companyId) !== String(requester.companyId)
+    ) {
+      res.status(403).json({
+        error: 'Acesso negado à escala deste funcionário.',
+      });
+      return;
+    }
 
     const schedule = await WorkSchedule.findOne({ employeeId });
 
@@ -87,14 +132,25 @@ export const getWorkSchedule = async (
 
 // Listar escalas de todos os funcionários
 export const listWorkSchedules = async (
-  _req: Request,
+  req: CustomRequest,
   res: Response
 ): Promise<void> => {
   try {
-    const schedules = await WorkSchedule.find().populate(
+    const requester = req.user!;
+
+    let query = {};
+    if (requester.role === 'sub_admin') {
+      // Busca apenas os funcionários da empresa do sub_admin
+      const employees = await Employee.find({ companyId: requester.companyId });
+      const employeeIds = employees.map((emp) => emp._id);
+      query = { employeeId: { $in: employeeIds } };
+    }
+
+    const schedules = await WorkSchedule.find(query).populate(
       'employeeId',
       'name position'
     );
+
     res.status(200).json(schedules);
   } catch (error) {
     console.error('Erro ao listar escalas:', error);
@@ -104,11 +160,20 @@ export const listWorkSchedules = async (
 
 // Excluir escala de um funcionário
 export const deleteWorkSchedule = async (
-  req: Request,
+  req: CustomRequest,
   res: Response
 ): Promise<void> => {
   try {
     const { employeeId } = req.params;
+    const requester = req.user!;
+
+    // Verifica se o usuário é um admin
+    if (requester.role !== 'admin') {
+      res.status(403).json({
+        error: 'Você não tem permissão para excluir escalas.',
+      });
+      return;
+    }
 
     const deletedSchedule = await WorkSchedule.findOneAndDelete({ employeeId });
 

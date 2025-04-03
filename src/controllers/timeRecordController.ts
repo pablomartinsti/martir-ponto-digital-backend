@@ -3,11 +3,9 @@ import { getAggregatedTimeRecords } from '../utils/timeRecordAggregation';
 import { TimeRecord } from '../models/TimeRecord';
 import { Employee } from '../models/Employee';
 import { z } from 'zod';
+import { Company } from '../models/Company';
 
 // Schemas de validação
-const recordIdSchema = z.object({
-  recordId: z.string().nonempty('O ID do registro é obrigatório.'),
-});
 
 const clockInSchema = z.object({
   employeeId: z.string().nonempty('O ID do funcionário é obrigatório.'),
@@ -15,25 +13,69 @@ const clockInSchema = z.object({
   longitude: z.number(),
 });
 
-export const getTimeRecords = async (req: any, res: any) => {
+interface CustomUser {
+  id: string;
+  role: 'admin' | 'sub_admin' | 'employee';
+  companyId?: string;
+}
+
+export const getTimeRecords = async (req: Request, res: Response) => {
   try {
     const { startDate, endDate, period, employeeId } = req.query;
 
-    const requisitadoPor = (req as any).user.id;
-    const tipo = (req as any).user.role;
+    const user = (req as Request & { user?: CustomUser }).user;
 
-    const employeeIdConsultado =
-      tipo === 'admin' && employeeId ? employeeId : requisitadoPor;
+    if (!user) {
+      res.status(401).json({ error: 'Usuário não autenticado.' });
+      return;
+    }
+
+    let employeeIdConsultado: string;
+
+    if (user.role === 'admin') {
+      if (!employeeId) {
+        res.status(400).json({ error: 'employeeId é obrigatório para admin.' });
+        return;
+      }
+      employeeIdConsultado = String(employeeId);
+    } else if (user.role === 'sub_admin') {
+      if (!employeeId) {
+        res
+          .status(400)
+          .json({ error: 'employeeId é obrigatório para sub_admin.' });
+        return;
+      }
+
+      const employee = await Employee.findById(employeeId);
+
+      if (!employee || String(employee.companyId) !== user.companyId) {
+        res
+          .status(403)
+          .json({
+            error: 'Permissão negada. Funcionário não pertence à sua empresa.',
+          });
+        return;
+      }
+
+      employeeIdConsultado = String(employeeId);
+    } else if (user.role === 'employee') {
+      // Funcionário só pode consultar seus próprios dados
+      employeeIdConsultado = user.id;
+    } else {
+      res.status(403).json({ error: 'Permissão negada.' });
+      return;
+    }
 
     const records = await getAggregatedTimeRecords(
       employeeIdConsultado,
-      startDate as string,
-      endDate as string,
+      String(startDate),
+      String(endDate),
       period as 'day' | 'week' | 'month' | 'year'
     );
 
     if (!records.results || records.results.length === 0) {
-      return res.status(404).json({ message: 'Nenhum registro encontrado.' });
+      res.status(404).json({ message: 'Nenhum registro encontrado.' });
+      return;
     }
 
     res.status(200).json(records);
@@ -52,11 +94,23 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({ error: 'Funcionário não encontrado' });
       return;
     }
+    const company = await Company.findById(employee.companyId);
+    if (!company) {
+      res.status(404).json({ error: 'Empresa vinculada não encontrada.' });
+      return;
+    }
 
-    const isInLocation = validateLocation(latitude, longitude);
+    const isInLocation = validateLocation(
+      latitude,
+      longitude,
+      company.latitude,
+      company.longitude
+    );
+
     if (!isInLocation) {
       res.status(403).json({
-        error: 'Você precisa estar na empresa para registrar o ponto.',
+        error:
+          'Você parece estar fora da empresa. Verifique se está dentro do local e, se necessário, ative e desative a localização do seu dispositivo antes de tentar novamente.',
       });
       return;
     }
@@ -107,11 +161,23 @@ const updateTimeRecordField = async (
   field: 'lunchStart' | 'lunchEnd' | 'clockOut'
 ): Promise<void> => {
   try {
-    const { recordId } = recordIdSchema.parse(req.body);
+    const { recordId, latitude, longitude } = req.body;
 
     const timeRecord = await TimeRecord.findById(recordId);
     if (!timeRecord) {
       res.status(404).json({ error: 'Registro de ponto não encontrado.' });
+      return;
+    }
+
+    const employee = await Employee.findById(timeRecord.employeeId);
+    if (!employee) {
+      res.status(404).json({ error: 'Funcionário não encontrado.' });
+      return;
+    }
+
+    const company = await Company.findById(employee.companyId);
+    if (!company) {
+      res.status(404).json({ error: 'Empresa não encontrada.' });
       return;
     }
 
@@ -140,6 +206,20 @@ const updateTimeRecordField = async (
       res.status(400).json({ error: 'Jornada já finalizada hoje.' });
       return;
     }
+    const isInLocation = validateLocation(
+      latitude,
+      longitude,
+      company.latitude,
+      company.longitude
+    );
+
+    if (!isInLocation) {
+      res.status(403).json({
+        error:
+          'Você parece estar fora da empresa. Verifique se está dentro do local e, se necessário, ative e desative a localização do seu dispositivo antes de tentar novamente.',
+      });
+      return;
+    }
 
     // Atualiza o campo correspondente
     timeRecord[field] = new Date();
@@ -166,13 +246,15 @@ export const clockOut = (req: Request, res: Response): Promise<void> =>
   updateTimeRecordField(req, res, 'clockOut');
 
 // Validação de localização
-const validateLocation = (latitude: number, longitude: number): boolean => {
-  const companyLatitude = -18.91260879304069;
-  const companyLongitude = -48.18867069723629;
+const validateLocation = (
+  userLat: number,
+  userLng: number,
+  companyLat: number,
+  companyLng: number
+): boolean => {
   const maxDistance = 0.002; // ~222 metros
-
   return (
-    Math.abs(latitude - companyLatitude) <= maxDistance &&
-    Math.abs(longitude - companyLongitude) <= maxDistance
+    Math.abs(userLat - companyLat) <= maxDistance &&
+    Math.abs(userLng - companyLng) <= maxDistance
   );
 };

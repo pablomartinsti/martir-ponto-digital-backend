@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors'; // Importa o CORS
+import companyRoutes from './routes/companyRoutes';
 import employeeRoutes from './routes/employeeRoutes';
 import timeRecordRoutes from './routes/timeRecordRoutes';
 import workScheduleRoutes from './routes/workScheduleRoutes';
@@ -13,5 +14,6 @@ app.use(cors());
 app.use('/', employeeRoutes);
 app.use('/', timeRecordRoutes);
 app.use('/', workScheduleRoutes);
+app.use('/', companyRoutes);
 
 export default app;
