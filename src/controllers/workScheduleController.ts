@@ -6,15 +6,23 @@ import { Employee } from '../models/Employee';
 // Schema de validação para customDays
 const customDaySchema = z.object({
   day: z.enum([
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
-    'Sunday',
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+    'sunday',
   ]),
-  dailyHours: z.number().min(0).max(24),
+  start: z
+    .string()
+    .regex(/^([0-1]\d|2[0-3]):[0-5]\d$/, 'Formato de hora inválido (HH:mm)'),
+  end: z
+    .string()
+    .regex(/^([0-1]\d|2[0-3]):[0-5]\d$/, 'Formato de hora inválido (HH:mm)'),
+  hasLunch: z.boolean(),
+  expectedLunchBreakMinutes: z.number().min(0).max(180),
+  isDayOff: z.boolean(),
 });
 
 const workScheduleSchema = z.object({
@@ -43,7 +51,7 @@ export const setWorkSchedule = async (
       role: 'admin' | 'sub_admin';
       companyId?: string;
     };
-
+    // Verifica se o sub_admin tem permissão para editar a escala
     if (requester.role === 'sub_admin') {
       const employee = await Employee.findById(employeeId);
 
@@ -87,7 +95,7 @@ export const setWorkSchedule = async (
   }
 };
 
-// Buscar escala de um funcionário
+// Retorna a escala de trabalho de um funcionário específico
 export const getWorkSchedule = async (
   req: CustomRequest,
   res: Response
@@ -103,7 +111,7 @@ export const getWorkSchedule = async (
       return;
     }
 
-    // Verifica se o sub_admin está tentando acessar funcionário de outra empresa
+    // Sub_admin só pode acessar escala de funcionários da sua empresa
     if (
       requester.role === 'sub_admin' &&
       String(employee.companyId) !== String(requester.companyId)
@@ -127,66 +135,5 @@ export const getWorkSchedule = async (
   } catch (error) {
     console.error('Erro ao buscar escala:', error);
     res.status(500).json({ error: 'Erro ao buscar escala de trabalho.' });
-  }
-};
-
-// Listar escalas de todos os funcionários
-export const listWorkSchedules = async (
-  req: CustomRequest,
-  res: Response
-): Promise<void> => {
-  try {
-    const requester = req.user!;
-
-    let query = {};
-    if (requester.role === 'sub_admin') {
-      // Busca apenas os funcionários da empresa do sub_admin
-      const employees = await Employee.find({ companyId: requester.companyId });
-      const employeeIds = employees.map((emp) => emp._id);
-      query = { employeeId: { $in: employeeIds } };
-    }
-
-    const schedules = await WorkSchedule.find(query).populate(
-      'employeeId',
-      'name position'
-    );
-
-    res.status(200).json(schedules);
-  } catch (error) {
-    console.error('Erro ao listar escalas:', error);
-    res.status(500).json({ error: 'Erro ao listar escalas de trabalho.' });
-  }
-};
-
-// Excluir escala de um funcionário
-export const deleteWorkSchedule = async (
-  req: CustomRequest,
-  res: Response
-): Promise<void> => {
-  try {
-    const { employeeId } = req.params;
-    const requester = req.user!;
-
-    // Verifica se o usuário é um admin
-    if (requester.role !== 'admin') {
-      res.status(403).json({
-        error: 'Você não tem permissão para excluir escalas.',
-      });
-      return;
-    }
-
-    const deletedSchedule = await WorkSchedule.findOneAndDelete({ employeeId });
-
-    if (!deletedSchedule) {
-      res
-        .status(404)
-        .json({ error: 'Escala não encontrada para este funcionário' });
-      return;
-    }
-
-    res.status(200).json({ message: 'Escala excluída com sucesso' });
-  } catch (error) {
-    console.error('Erro ao excluir escala:', error);
-    res.status(500).json({ error: 'Erro ao excluir escala de trabalho' });
   }
 };

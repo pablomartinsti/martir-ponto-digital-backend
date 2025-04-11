@@ -4,6 +4,7 @@ import { Company } from '../models/Company';
 import { Employee } from '../models/Employee';
 import { z } from 'zod';
 
+// Validação dos dados para criação de sub_admin e empresa
 const createSubAdminSchema = z.object({
   name: z.string().min(1, 'O nome é obrigatório.'),
   cpf: z.string().length(11, 'O CPF deve ter 11 caracteres.'),
@@ -25,6 +26,7 @@ interface AuthenticatedRequest extends Request {
   user?: CustomUser;
 }
 
+// Rota para criação de empresa e sub_admin vinculado a ela
 export const createSubAdmin = async (
   req: Request,
   res: Response
@@ -43,6 +45,7 @@ export const createSubAdmin = async (
       longitude,
     } = validatedData;
 
+    // Impede duplicação de empresa ou CPF
     const existingCompany = await Company.findOne({ cnpj });
     if (existingCompany) {
       res.status(400).json({ error: 'Empresa já cadastrada com este CNPJ.' });
@@ -54,16 +57,17 @@ export const createSubAdmin = async (
       res.status(400).json({ error: 'CPF já está em uso.' });
       return;
     }
-
+    // Cria a empresa
     const company = new Company({
       name: companyName,
       cnpj,
-      latitude, // 👈 agora vai!
-      longitude, // 👈 também
+      latitude,
+      longitude,
     });
 
     await company.save();
 
+    // Cria o sub_admin com senha criptografada
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const subAdmin = new Employee({
@@ -99,6 +103,7 @@ export const createSubAdmin = async (
   }
 };
 
+// Rota para listagem de todas as empresas (acesso restrito a admin)
 export const getAllCompanies = async (
   req: AuthenticatedRequest,
   res: Response
@@ -113,7 +118,7 @@ export const getAllCompanies = async (
       });
     }
 
-    // ✅ Inclui o cnpj no retorno
+    // Lista todas as empresas com nome e CNPJ
     const companies = await Company.find({}, '_id name cnpj');
     res.status(200).json(companies);
   } catch (error) {

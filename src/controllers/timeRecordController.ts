@@ -1,12 +1,14 @@
+// Controller responsável pelo registro de ponto (entrada, almoço e saída), validações de localização,
+// e consulta de registros agregados (por dia, semana ou mês).
 import { Request, Response } from 'express';
 import { getAggregatedTimeRecords } from '../utils/timeRecordAggregation';
 import { TimeRecord } from '../models/TimeRecord';
 import { Employee } from '../models/Employee';
+import { WorkSchedule } from '../models/WorkSchedule';
 import { z } from 'zod';
 import { Company } from '../models/Company';
 
-// Schemas de validação
-
+// Validação do schema de entrada do ponto
 const clockInSchema = z.object({
   employeeId: z.string().nonempty('O ID do funcionário é obrigatório.'),
   latitude: z.number(),
@@ -19,14 +21,29 @@ interface CustomUser {
   companyId?: string;
 }
 
-export const getTimeRecords = async (req: Request, res: Response) => {
+// Consulta registros de ponto agrupados por período
+export const getTimeRecords = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
     const { startDate, endDate, period, employeeId } = req.query;
-
     const user = (req as Request & { user?: CustomUser }).user;
 
     if (!user) {
       res.status(401).json({ error: 'Usuário não autenticado.' });
+      return;
+    }
+
+    if (!startDate || !endDate || !period) {
+      res.status(400).json({ error: 'Parâmetros obrigatórios ausentes.' });
+      return;
+    }
+
+    if (!['day', 'week', 'month'].includes(period as string)) {
+      res
+        .status(400)
+        .json({ error: 'Período inválido. Use day, week ou month.' });
       return;
     }
 
@@ -47,7 +64,6 @@ export const getTimeRecords = async (req: Request, res: Response) => {
       }
 
       const employee = await Employee.findById(employeeId);
-
       if (!employee || String(employee.companyId) !== user.companyId) {
         res.status(403).json({
           error: 'Permissão negada. Funcionário não pertence à sua empresa.',
@@ -57,7 +73,6 @@ export const getTimeRecords = async (req: Request, res: Response) => {
 
       employeeIdConsultado = String(employeeId);
     } else if (user.role === 'employee') {
-      // Funcionário só pode consultar seus próprios dados
       employeeIdConsultado = user.id;
     } else {
       res.status(403).json({ error: 'Permissão negada.' });
@@ -68,10 +83,10 @@ export const getTimeRecords = async (req: Request, res: Response) => {
       employeeIdConsultado,
       String(startDate),
       String(endDate),
-      period as 'day' | 'week' | 'month' | 'year'
+      period as 'day' | 'week' | 'month'
     );
 
-    if (!records.results || records.results.length === 0) {
+    if (!records.records || records.records.length === 0) {
       res.status(404).json({ message: 'Nenhum registro encontrado.' });
       return;
     }
@@ -83,6 +98,7 @@ export const getTimeRecords = async (req: Request, res: Response) => {
   }
 };
 
+// Registro de entrada (clock-in)
 export const clockIn = async (req: Request, res: Response): Promise<void> => {
   try {
     const { employeeId, latitude, longitude } = clockInSchema.parse(req.body);
@@ -98,6 +114,10 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    const now = new Date();
+    const localDate = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+    const today = localDate.toISOString().split('T')[0];
+
     const isInLocation = validateLocation(
       latitude,
       longitude,
@@ -106,43 +126,56 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
     );
 
     if (!isInLocation) {
+      res.status(403).json({ error: 'Você parece estar fora da empresa.' });
+      return;
+    }
+
+    const schedule = await WorkSchedule.findOne({ employeeId });
+    const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'long' })
+      .format(localDate)
+      .toLowerCase();
+    const todaySchedule = schedule?.customDays.find(
+      (d) => d.day.toLowerCase() === dayOfWeek
+    );
+
+    if (!todaySchedule || todaySchedule.isDayOff) {
+      res.status(403).json({ error: 'Hoje é folga ou não possui escala.' });
+      return;
+    }
+
+    const [hour, minute] = todaySchedule.start.split(':').map(Number);
+    const startAllowed = new Date(localDate);
+    startAllowed.setHours(hour, minute, 0, 0);
+
+    if (localDate < startAllowed) {
       res.status(403).json({
-        error:
-          'Você parece estar fora da empresa. Verifique se está dentro do local e, se necessário, ative e desative a localização do seu dispositivo antes de tentar novamente.',
+        error: 'Não é permitido bater ponto antes do início da jornada.',
       });
       return;
     }
 
-    const now = new Date();
-    const localDate = new Date(now.getTime() - 3 * 60 * 60 * 1000); // Ajusta para horário do Brasil
-    const today = localDate.toISOString().split('T')[0];
-
-    // Verifica se já existe um registro para o "dia local"
     const existingRecord = await TimeRecord.findOne({
       employeeId,
       date: today,
     });
-
     if (existingRecord?.clockIn) {
       res.status(400).json({ error: 'Jornada já iniciada hoje.' });
       return;
     }
 
-    // Caso não exista um registro com `clockIn`, cria ou atualiza o registro
     const timeRecord = await TimeRecord.findOneAndUpdate(
-      { employeeId, date: today }, // Busca pelo ID do funcionário e a data
+      { employeeId, date: today },
       {
         $set: {
           clockIn: new Date(),
           location: { latitude, longitude },
           date: today,
         },
-      }, // Atualiza ou cria
-      { new: true, upsert: true } // Retorna o registro atualizado ou cria um novo
+      },
+      { new: true, upsert: true }
     );
 
     res.status(201).json(timeRecord);
-    return;
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ errors: error.errors });
@@ -153,6 +186,7 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
+// Atualiza um campo específico do registro de ponto (almoço ou saída)
 const updateTimeRecordField = async (
   req: Request,
   res: Response,
@@ -179,7 +213,18 @@ const updateTimeRecordField = async (
       return;
     }
 
-    // Verificar se a ação já foi realizada
+    const isInLocation = validateLocation(
+      latitude,
+      longitude,
+      company.latitude,
+      company.longitude
+    );
+
+    if (!isInLocation) {
+      res.status(403).json({ error: 'Você parece estar fora da empresa.' });
+      return;
+    }
+
     if (field === 'lunchStart' && timeRecord.lunchStart) {
       res.status(400).json({ error: 'Saída para almoço já registrada hoje.' });
       return;
@@ -198,28 +243,38 @@ const updateTimeRecordField = async (
           .json({ error: 'Retorno do almoço já registrado hoje.' });
         return;
       }
+
+      const schedule = await WorkSchedule.findOne({
+        employeeId: timeRecord.employeeId,
+      });
+
+      const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'long' })
+        .format(new Date((timeRecord as any).date + 'T00:00:00'))
+        .toLowerCase();
+
+      const todaySchedule = schedule?.customDays.find(
+        (d) => d.day.toLowerCase() === dayOfWeek
+      );
+      const expectedBreakMinutes =
+        todaySchedule?.expectedLunchBreakMinutes || 60;
+
+      const diffInMs =
+        new Date().getTime() - new Date(timeRecord.lunchStart).getTime();
+      const diffInMinutes = diffInMs / 60000;
+
+      if (diffInMinutes < expectedBreakMinutes) {
+        res.status(403).json({
+          error: `Tempo mínimo de intervalo para almoço: ${expectedBreakMinutes} minutos.`,
+        });
+        return;
+      }
     }
 
     if (field === 'clockOut' && timeRecord.clockOut) {
       res.status(400).json({ error: 'Jornada já finalizada hoje.' });
       return;
     }
-    const isInLocation = validateLocation(
-      latitude,
-      longitude,
-      company.latitude,
-      company.longitude
-    );
 
-    if (!isInLocation) {
-      res.status(403).json({
-        error:
-          'Você parece estar fora da empresa. Verifique se está dentro do local e, se necessário, ative e desative a localização do seu dispositivo antes de tentar novamente.',
-      });
-      return;
-    }
-
-    // Atualiza o campo correspondente
     timeRecord[field] = new Date();
     await timeRecord.save();
 
@@ -234,6 +289,7 @@ const updateTimeRecordField = async (
   }
 };
 
+// Funções específicas de atualização
 export const startLunch = (req: Request, res: Response): Promise<void> =>
   updateTimeRecordField(req, res, 'lunchStart');
 
@@ -243,7 +299,7 @@ export const endLunch = (req: Request, res: Response): Promise<void> =>
 export const clockOut = (req: Request, res: Response): Promise<void> =>
   updateTimeRecordField(req, res, 'clockOut');
 
-// Validação de localização
+// Validação de proximidade da localização do funcionário com a da empresa
 const validateLocation = (
   userLat: number,
   userLng: number,

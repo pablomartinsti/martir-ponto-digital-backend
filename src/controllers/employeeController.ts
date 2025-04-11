@@ -6,13 +6,13 @@ import { WorkSchedule } from '../models/WorkSchedule';
 import { TimeRecord } from '../models/TimeRecord';
 
 import {
-  deleteEmployeeSchema,
   employeeSchema,
   filterEmployeesSchema,
   loginSchema,
   toggleStatusSchema,
 } from '../utils/validationSchemas';
 import { z } from 'zod';
+import { Company } from '../models/Company';
 
 const SECRET_KEY = process.env.JWT_SECRET!;
 
@@ -22,6 +22,7 @@ interface CustomUser {
   companyId?: string;
 }
 
+// Cria novo funcionário (apenas admin ou sub_admin)
 export const createEmployee = async (
   req: Request,
   res: Response
@@ -72,6 +73,7 @@ export const createEmployee = async (
   }
 };
 
+// Login de funcionário com validação de senha e geração de token
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const validatedData = loginSchema.parse(req.body);
@@ -128,6 +130,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
+// Listar funcionários com filtros por status e CNPJ (admin/sub_admin)
 export const getEmployees = async (
   req: Request,
   res: Response
@@ -189,7 +192,7 @@ export const getEmployees = async (
     return;
   }
 };
-
+// Ativa ou inativa um funcionário e todos os subordinados caso seja sub_admin
 export const toggleEmployeeStatus = async (
   req: Request,
   res: Response
@@ -256,31 +259,57 @@ export const toggleEmployeeStatus = async (
   }
 };
 
-export const deleteEmployee = async (
+const deleteSubAdminSchema = z.object({
+  id: z.string().nonempty('ID é obrigatório'),
+});
+
+// Exclui sub_admin, todos os funcionários da empresa e a empresa se necessário
+export const deleteSubAdminAndEmployees = async (
   req: Request,
   res: Response
 ): Promise<void> => {
   try {
-    const { id } = deleteEmployeeSchema.parse(req.params);
+    const { id } = deleteSubAdminSchema.parse(req.params);
 
-    const employee = await Employee.findById(id);
-    if (!employee) {
-      res.status(404).json({ error: 'Funcionário não encontrado' });
+    const subAdmin = await Employee.findById(id);
+    if (!subAdmin || subAdmin.role !== 'sub_admin') {
+      res.status(404).json({ error: 'Sub admin não encontrado.' });
+      return;
     }
 
-    await WorkSchedule.deleteMany({ employeeId: id });
-    await TimeRecord.deleteMany({ employeeId: id });
+    const companyId = subAdmin.companyId;
+
+    // Busca e remove funcionários da empresa
+    const employees = await Employee.find({ companyId, role: 'employee' });
+    const employeeIds = employees.map((emp) => emp._id);
+
+    await WorkSchedule.deleteMany({ employeeId: { $in: employeeIds } });
+    await TimeRecord.deleteMany({ employeeId: { $in: employeeIds } });
+    await Employee.deleteMany({ _id: { $in: employeeIds } });
+
+    // Remove o sub admin
     await Employee.findByIdAndDelete(id);
 
+    // Verifica se ainda há algum sub_admin vinculado à empresa
+    const stillHasSubAdmins = await Employee.exists({
+      companyId,
+      role: 'sub_admin',
+    });
+
+    if (!stillHasSubAdmins) {
+      await Company.findByIdAndDelete(companyId);
+    }
+
     res.status(200).json({
-      message: 'Funcionário e registros associados excluídos com sucesso',
+      message:
+        'Sub admin, funcionários e dados associados foram excluídos com sucesso. Empresa também excluída se não havia outro sub admin.',
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ errors: error.errors });
     } else {
-      console.error('Erro ao excluir funcionário:', error);
-      res.status(500).json({ error: 'Erro ao excluir funcionário.' });
+      console.error('Erro ao excluir sub admin:', error);
+      res.status(500).json({ error: 'Erro interno ao excluir sub admin.' });
     }
   }
 };

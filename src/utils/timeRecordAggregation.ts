@@ -1,7 +1,22 @@
+// Função responsável por agrupar e calcular registros de ponto (TimeRecords)
+// com base em um período definido (dia, semana ou mês), retornando o saldo
+// de horas trabalhadas, ausências, folgas e cálculo final do período.
+
 import { TimeRecord } from '../models/TimeRecord';
 import { WorkSchedule } from '../models/WorkSchedule';
+import { Absence, AbsenceType } from '../models/Absence';
 import mongoose from 'mongoose';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
 
+// Plugins do dayjs para lidar com fuso horário e comparação de datas
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(isSameOrBefore);
+
+// Utilitário para formatar horas em formato HH:mm:ss
 const formatHours = (decimalHours: number): string => {
   if (isNaN(decimalHours)) return '00:00:00';
 
@@ -18,195 +33,231 @@ const formatHours = (decimalHours: number): string => {
   return isNegative ? `-${formattedTime}` : formattedTime;
 };
 
+// Calcula as horas esperadas de trabalho para um dia com base na escala
+function getExpectedHours(schedule: any): number {
+  const [startH, startM] = schedule.start.split(':').map(Number);
+  const [endH, endM] = schedule.end.split(':').map(Number);
+  const startMinutes = startH * 60 + startM;
+  const endMinutes = endH * 60 + endM;
+  const totalMinutes = endMinutes - startMinutes;
+  return schedule.hasLunch
+    ? (totalMinutes - schedule.expectedLunchBreakMinutes) / 60
+    : totalMinutes / 60;
+}
+
+// Mapeia os tipos de ausência para descrições em português
+function traduzirTipoAbsence(type: AbsenceType): string {
+  const map: Record<AbsenceType, string> = {
+    vacation: 'Férias',
+    sick_leave: 'Atestado médico',
+    justified: 'Falta justificada',
+    day_off: 'Folga concedida',
+    holiday: 'Feriado',
+    unjustified: 'Falta injustificada',
+  };
+  return map[type];
+}
+
 export const getAggregatedTimeRecords = async (
   employeeId: string,
   startDate: string,
   endDate: string,
-  period: 'day' | 'week' | 'month' | 'year'
+  period: 'day' | 'week' | 'month'
 ) => {
-  const start = new Date(startDate);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(endDate);
-  end.setHours(23, 59, 59, 999);
+  // Converte datas recebidas para objetos Date com fuso de São Paulo
+  const start = dayjs
+    .tz(startDate, 'America/Sao_Paulo')
+    .startOf('day')
+    .toDate();
+  const end = dayjs.tz(endDate, 'America/Sao_Paulo').endOf('day').toDate();
 
+  // Busca a escala de trabalho do funcionário
   const schedule = await WorkSchedule.findOne({ employeeId });
-
   if (!schedule) {
-    throw new Error('Escala de trabalho não encontrada.');
+    return {
+      period: { startDate, endDate, type: period },
+      records: [],
+      totalPositiveHours: '00:00:00',
+      totalNegativeHours: '00:00:00',
+      finalBalance: '00:00:00',
+      error: 'Escala de trabalho não encontrada.',
+    };
   }
 
-  const scheduleHoursPerDay = schedule.customDays.reduce(
+  // Transforma a escala em um objeto indexado por dia da semana
+  const schedulePerDay = schedule.customDays.reduce(
     (acc, day) => {
-      acc[day.day.toLowerCase()] = day.dailyHours;
+      acc[day.day.toLowerCase()] = day;
       return acc;
     },
-    {} as { [key: string]: number }
+    {} as Record<string, any>
   );
 
+  const formattedStart = dayjs(start).format('YYYY-MM-DD');
+  const formattedEnd = dayjs(end).format('YYYY-MM-DD');
+
+  // Busca ausências registradas no período
+  const absences = await Absence.find({
+    employeeId,
+    date: { $gte: formattedStart, $lte: formattedEnd },
+  });
+
+  // Agregação dos registros de ponto para calcular horas trabalhadas
   const aggregationResults = await TimeRecord.aggregate([
     {
       $match: {
         employeeId: new mongoose.Types.ObjectId(employeeId),
-        date: { $gte: startDate, $lte: endDate },
+        date: { $gte: formattedStart, $lte: formattedEnd },
       },
     },
     {
       $addFields: {
-        clockInLocal: {
-          $subtract: ['$clockIn', 1000 * 60 * 60 * 3], // Ajuste para UTC-3
-        },
-        totalWorkedMilliseconds: {
-          $subtract: [{ $ifNull: ['$clockOut', new Date()] }, '$clockIn'],
-        },
-        lunchBreakMilliseconds: {
-          $cond: {
-            if: { $and: ['$lunchStart', '$lunchEnd'] },
-            then: { $subtract: ['$lunchEnd', '$lunchStart'] },
-            else: 0,
-          },
-        },
         workedMilliseconds: {
-          $subtract: [
-            {
-              $subtract: [{ $ifNull: ['$clockOut', new Date()] }, '$clockIn'],
-            },
-            {
-              $cond: {
-                if: { $and: ['$lunchStart', '$lunchEnd'] },
-                then: { $subtract: ['$lunchEnd', '$lunchStart'] },
-                else: 0,
+          $let: {
+            vars: {
+              totalWorked: {
+                $subtract: [{ $ifNull: ['$clockOut', new Date()] }, '$clockIn'],
+              },
+              lunchBreak: {
+                $cond: {
+                  if: { $and: ['$lunchStart', '$lunchEnd'] },
+                  then: { $subtract: ['$lunchEnd', '$lunchStart'] },
+                  else: 0,
+                },
               },
             },
-          ],
+            in: {
+              $subtract: ['$$totalWorked', '$$lunchBreak'],
+            },
+          },
         },
       },
     },
     {
       $group: {
-        _id:
-          period === 'year'
-            ? {
-                year: { $year: '$clockInLocal' },
-                month: { $month: '$clockInLocal' },
-              }
-            : period === 'month'
-              ? {
-                  month: { $month: '$clockInLocal' },
-                  year: { $year: '$clockInLocal' },
-                }
-              : period === 'week'
-                ? {
-                    week: { $isoWeek: '$clockInLocal' },
-                    year: { $isoWeekYear: '$clockInLocal' },
-                  }
-                : {
-                    day: { $dayOfMonth: '$clockInLocal' },
-                    month: { $month: '$clockInLocal' },
-                    year: { $year: '$clockInLocal' },
-                  },
-        ...(period === 'year'
-          ? { totalWorkedMilliseconds: { $sum: '$workedMilliseconds' } }
-          : {
-              records: {
-                $push: {
-                  _id: '$_id',
-                  date: '$date',
-                  clockIn: '$clockIn',
-                  lunchStart: '$lunchStart',
-                  lunchEnd: '$lunchEnd',
-                  clockOut: '$clockOut',
-                  location: '$location',
-                  workedHours: { $divide: ['$workedMilliseconds', 3600000] },
-                },
-              },
-            }),
+        _id: null,
+        records: {
+          $push: {
+            _id: '$_id',
+            date: '$date',
+            clockIn: '$clockIn',
+            lunchStart: '$lunchStart',
+            lunchEnd: '$lunchEnd',
+            clockOut: '$clockOut',
+            location: '$location',
+            workedHours: { $divide: ['$workedMilliseconds', 3600000] },
+          },
+        },
       },
     },
-    {
-      $sort: { '_id.year': 1, '_id.month': 1 },
-    },
   ]);
+
+  // Geração de todas as datas do intervalo informado
+  const allDates: string[] = [];
+  let current = dayjs.tz(startDate, 'America/Sao_Paulo');
+  const endDayjs = dayjs.tz(endDate, 'America/Sao_Paulo');
+
+  while (current.isSameOrBefore(endDayjs, 'day')) {
+    allDates.push(current.format('YYYY-MM-DD'));
+    current = current.add(1, 'day');
+  }
+
+  // Cria um mapa indexando os registros por data
+  const recordsByDate = new Map<string, any>(
+    (aggregationResults[0]?.records || []).map((rec: any) => [rec.date, rec])
+  );
 
   let totalPositiveHours = 0;
   let totalNegativeHours = 0;
 
-  const updatedResults = aggregationResults.map((result: any) => {
-    if (period === 'year') {
-      const year = result._id.year;
-      const month = result._id.month;
+  // Mapeia os dados por data com base nos registros, ausências e escala
+  const updatedRecords = allDates.map((dateStr) => {
+    const record = recordsByDate.get(dateStr);
+    const dateInBrazil = dayjs.tz(dateStr, 'America/Sao_Paulo');
+    const dayOfWeek = dateInBrazil.format('dddd').toLowerCase();
 
-      let expectedHoursInMonth = 0;
-      let workedHours = result.totalWorkedMilliseconds / (1000 * 60 * 60);
+    const daySchedule = schedulePerDay[dayOfWeek];
+    const absence = absences.find((a) => a.date === dateStr);
+    const expectedHours = daySchedule ? getExpectedHours(daySchedule) : 0;
 
-      for (let day = 1; day <= 31; day++) {
-        const date = new Date(year, month - 1, day);
-        if (date.getMonth() + 1 !== month) break;
-
-        const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'long' })
-          .format(date)
-          .toLowerCase();
-
-        expectedHoursInMonth += scheduleHoursPerDay[dayOfWeek] || 0;
-      }
-
-      const balance = workedHours - expectedHoursInMonth;
-      totalPositiveHours += Math.max(balance, 0);
-      totalNegativeHours += Math.max(-balance, 0);
-
+    // Dia sem expediente
+    if (!daySchedule || daySchedule.isDayOff) {
       return {
-        _id: result._id,
-        totalWorkedHours: formatHours(workedHours),
-        expectedHours: formatHours(expectedHoursInMonth),
-        totalPositiveHours: formatHours(Math.max(balance, 0)),
-        totalNegativeHours: formatHours(Math.max(-balance, 0)),
-        finalBalance: formatHours(balance),
+        date: dateStr,
+        workedHours: formatHours(0),
+        balance: formatHours(0),
+        status: 'Folga',
       };
     }
 
-    let weekPositiveHours = 0;
-    let weekNegativeHours = 0;
+    // Dia com ausência registrada
+    if (absence) {
+      const isNegative = absence.type === 'unjustified';
+      const worked = isNegative ? 0 : expectedHours;
+      const balance = isNegative ? -expectedHours : 0;
 
-    const updatedRecords = result.records.map((record: any) => {
-      // Corrige o clockIn para o horário do Brasil (UTC-3)
-      const dateInBrazil = new Date(`${record.date}T00:00:00-03:00`);
-
-      // Pega o dia da semana com base no horário do Brasil
-      const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'long' })
-        .format(dateInBrazil)
-        .toLowerCase();
-
-      // Busca a carga horária esperada com base na escala do funcionário
-      const expectedHours = scheduleHoursPerDay[dayOfWeek] || 0;
-      const workedHours = isNaN(record.workedHours) ? 0 : record.workedHours;
-      const balance = workedHours - expectedHours;
-
-      if (balance > 0) {
-        weekPositiveHours += balance;
-      } else {
-        weekNegativeHours += Math.abs(balance);
+      if (isNegative) {
+        totalNegativeHours += expectedHours;
       }
 
       return {
-        _id: record._id,
-        clockIn: record.clockIn ? record.clockIn.toISOString() : null,
-        lunchStart: record.lunchStart ? record.lunchStart.toISOString() : null,
-        lunchEnd: record.lunchEnd ? record.lunchEnd.toISOString() : null,
-        clockOut: record.clockOut ? record.clockOut.toISOString() : null,
-        location: record.location,
+        date: dateStr,
+        workedHours: formatHours(worked),
+        balance: formatHours(balance),
+        status: traduzirTipoAbsence(absence.type),
+      };
+    }
+
+    // Dia com jornada completa
+    if (
+      record?.clockIn &&
+      record?.lunchStart &&
+      record?.lunchEnd &&
+      record?.clockOut
+    ) {
+      const workedHours = isNaN(record.workedHours) ? 0 : record.workedHours;
+      const balance = workedHours - expectedHours;
+      if (balance > 0) totalPositiveHours += balance;
+      else totalNegativeHours += Math.abs(balance);
+
+      return {
+        date: dateStr,
+        clockIn: record.clockIn,
+        lunchStart: record.lunchStart,
+        lunchEnd: record.lunchEnd,
+        clockOut: record.clockOut,
         workedHours: formatHours(workedHours),
         balance: formatHours(balance),
+        status:
+          balance === 0
+            ? 'Jornada completa'
+            : balance > 0
+              ? 'Hora extra'
+              : 'Horas faltando',
       };
-    });
+    } else {
+      // Jornada incompleta (parcial)
+      const parcial =
+        record?.clockIn && record?.lunchStart && !record?.lunchEnd
+          ? (new Date(record.lunchStart).getTime() -
+              new Date(record.clockIn).getTime()) /
+            3600000
+          : 0;
 
-    totalPositiveHours += weekPositiveHours;
-    totalNegativeHours += weekNegativeHours;
+      const balance = parcial - expectedHours;
+      if (balance > 0) totalPositiveHours += balance;
+      else totalNegativeHours += Math.abs(balance);
 
-    return {
-      _id: result._id,
-      records: updatedRecords,
-    };
+      return {
+        date: dateStr,
+        workedHours: formatHours(parcial),
+        balance: formatHours(balance),
+        status: 'Jornada incompleta',
+      };
+    }
   });
 
+  // Resultado final de horas positivas e negativas
   const finalBalance = totalPositiveHours - totalNegativeHours;
 
   return {
@@ -215,7 +266,7 @@ export const getAggregatedTimeRecords = async (
       endDate,
       type: period,
     },
-    results: updatedResults,
+    records: updatedRecords,
     totalPositiveHours: formatHours(totalPositiveHours),
     totalNegativeHours: formatHours(totalNegativeHours),
     finalBalance: formatHours(finalBalance),

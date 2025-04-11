@@ -4,7 +4,7 @@ import {
   getEmployees,
   toggleEmployeeStatus,
   login,
-  deleteEmployee,
+  deleteSubAdminAndEmployees,
 } from '../controllers/employeeController';
 import { authenticate, authorize } from '../middlewares/authMiddleware';
 
@@ -42,7 +42,7 @@ router.delete(
   '/employees/:id',
   authenticate,
   authorize(['admin']),
-  deleteEmployee
+  deleteSubAdminAndEmployees
 );
 
 export default router;
