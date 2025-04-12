@@ -156,8 +156,12 @@ export const getAggregatedTimeRecords = async (
   const allDates: string[] = [];
   let current = dayjs.tz(startDate, 'America/Sao_Paulo');
   const endDayjs = dayjs.tz(endDate, 'America/Sao_Paulo');
+  const today = dayjs().tz('America/Sao_Paulo').endOf('day');
 
-  while (current.isSameOrBefore(endDayjs, 'day')) {
+  while (
+    current.isSameOrBefore(endDayjs, 'day') &&
+    current.isSameOrBefore(today, 'day')
+  ) {
     allDates.push(current.format('YYYY-MM-DD'));
     current = current.add(1, 'day');
   }
@@ -202,6 +206,11 @@ export const getAggregatedTimeRecords = async (
 
       return {
         date: dateStr,
+        justified: true,
+        clockIn: record?.clockIn || null,
+        lunchStart: record?.lunchStart || null,
+        lunchEnd: record?.lunchEnd || null,
+        clockOut: record?.clockOut || null,
         workedHours: formatHours(worked),
         balance: formatHours(balance),
         status: traduzirTipoAbsence(absence.type),
@@ -250,6 +259,11 @@ export const getAggregatedTimeRecords = async (
 
       return {
         date: dateStr,
+        justified: true,
+        clockIn: record?.clockIn || null,
+        lunchStart: record?.lunchStart || null,
+        lunchEnd: record?.lunchEnd || null,
+        clockOut: record?.clockOut || null,
         workedHours: formatHours(parcial),
         balance: formatHours(balance),
         status: 'Jornada incompleta',
