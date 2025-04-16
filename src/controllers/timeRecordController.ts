@@ -8,6 +8,11 @@ import { WorkSchedule } from '../models/WorkSchedule';
 import { z } from 'zod';
 import { Company } from '../models/Company';
 import dayjs from 'dayjs';
+import timezone from 'dayjs/plugin/timezone';
+import utc from 'dayjs/plugin/utc';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 // Validação do schema de entrada do ponto
 const clockInSchema = z.object({
@@ -120,6 +125,7 @@ export const getTimeRecords = async (
 };
 
 // Registro de entrada (clock-in)
+
 export const clockIn = async (req: Request, res: Response): Promise<void> => {
   try {
     const { employeeId, latitude, longitude } = clockInSchema.parse(req.body);
@@ -129,15 +135,16 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({ error: 'Funcionário não encontrado' });
       return;
     }
+
     const company = await Company.findById(employee.companyId);
     if (!company) {
       res.status(404).json({ error: 'Empresa vinculada não encontrada.' });
       return;
     }
 
-    const now = new Date();
-    const localDate = new Date(now.getTime() - 3 * 60 * 60 * 1000);
-    const today = localDate.toISOString().split('T')[0];
+    // ✅ Usa hora de Brasília corretamente
+    const now = dayjs().tz('America/Sao_Paulo');
+    const today = now.format('YYYY-MM-DD');
 
     const isInLocation = validateLocation(
       latitude,
@@ -152,9 +159,7 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
     }
 
     const schedule = await WorkSchedule.findOne({ employeeId });
-    const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'long' })
-      .format(localDate)
-      .toLowerCase();
+    const dayOfWeek = now.format('dddd').toLowerCase();
     const todaySchedule = schedule?.customDays.find(
       (d) => d.day.toLowerCase() === dayOfWeek
     );
@@ -164,14 +169,26 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // 🕐 Define início permitido e tolerância de 5 minutos antes
     const [hour, minute] = todaySchedule.start.split(':').map(Number);
-    const startAllowed = new Date(localDate);
-    startAllowed.setHours(hour, minute, 0, 0);
+    const startAllowed = now
+      .clone()
+      .set('hour', hour)
+      .set('minute', minute)
+      .set('second', 0)
+      .set('millisecond', 0);
+    const cincoMinAntes = startAllowed.subtract(5, 'minute');
 
-    if (localDate < startAllowed) {
+    console.log('🕒 Agora:', now.format());
+    console.log('🟩 Início da escala:', startAllowed.format());
+    console.log('🕔 Permitido a partir de:', cincoMinAntes.format());
+
+    if (now.isBefore(cincoMinAntes)) {
       res.status(403).json({
-        error: 'Não é permitido bater ponto antes do início da jornada.',
+        error:
+          'Você ainda não pode iniciar a jornada. É permitido bater ponto até 5 minutos antes do horário da escala.',
       });
+
       return;
     }
 
@@ -179,6 +196,7 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
       employeeId,
       date: today,
     });
+
     if (existingRecord?.clockIn) {
       res.status(400).json({ error: 'Jornada já iniciada hoje.' });
       return;
@@ -188,7 +206,7 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
       { employeeId, date: today },
       {
         $set: {
-          clockIn: new Date(),
+          clockIn: now.toDate(),
           location: { latitude, longitude },
           date: today,
         },
