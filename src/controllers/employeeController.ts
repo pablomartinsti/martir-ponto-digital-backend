@@ -107,7 +107,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         companyId: employee.companyId,
       },
       SECRET_KEY,
-      { expiresIn: '1m' }
+      { expiresIn: '1d' }
     );
 
     res.status(200).json({
