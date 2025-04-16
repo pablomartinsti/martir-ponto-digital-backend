@@ -7,6 +7,7 @@ import { Employee } from '../models/Employee';
 import { WorkSchedule } from '../models/WorkSchedule';
 import { z } from 'zod';
 import { Company } from '../models/Company';
+import dayjs from 'dayjs';
 
 // Validação do schema de entrada do ponto
 const clockInSchema = z.object({
@@ -48,6 +49,7 @@ export const getTimeRecords = async (
     }
 
     let employeeIdConsultado: string;
+    let employee;
 
     if (user.role === 'admin') {
       if (!employeeId) {
@@ -55,6 +57,11 @@ export const getTimeRecords = async (
         return;
       }
       employeeIdConsultado = String(employeeId);
+      employee = await Employee.findById(employeeId);
+      if (!employee) {
+        res.status(404).json({ error: 'Funcionário não encontrado.' });
+        return;
+      }
     } else if (user.role === 'sub_admin') {
       if (!employeeId) {
         res
@@ -63,7 +70,7 @@ export const getTimeRecords = async (
         return;
       }
 
-      const employee = await Employee.findById(employeeId);
+      employee = await Employee.findById(employeeId);
       if (!employee || String(employee.companyId) !== user.companyId) {
         res.status(403).json({
           error: 'Permissão negada. Funcionário não pertence à sua empresa.',
@@ -74,15 +81,29 @@ export const getTimeRecords = async (
       employeeIdConsultado = String(employeeId);
     } else if (user.role === 'employee') {
       employeeIdConsultado = user.id;
+      employee = await Employee.findById(user.id);
+      if (!employee) {
+        res.status(404).json({ error: 'Funcionário não encontrado.' });
+        return;
+      }
     } else {
       res.status(403).json({ error: 'Permissão negada.' });
       return;
     }
 
+    // 🔒 Ajuste: impedir registros antes da criação do funcionário
+    const inputStart = dayjs(String(startDate)).startOf('day');
+    const inputEnd = dayjs(String(endDate)).endOf('day');
+    const createdAt = dayjs(employee.createdAt).startOf('day');
+
+    const adjustedStart = inputStart.isBefore(createdAt)
+      ? createdAt
+      : inputStart;
+
     const records = await getAggregatedTimeRecords(
       employeeIdConsultado,
-      String(startDate),
-      String(endDate),
+      adjustedStart.format('YYYY-MM-DD'),
+      inputEnd.format('YYYY-MM-DD'),
       period as 'day' | 'week' | 'month'
     );
 

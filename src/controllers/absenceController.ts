@@ -61,6 +61,16 @@ export const createOrUpdateAbsence = async (
       return;
     }
 
+    const employeeCreatedAt = dayjs(employee.createdAt).startOf('day');
+    const requestedAbsenceDate = dayjs.tz(data.date).startOf('day');
+
+    if (requestedAbsenceDate.isBefore(employeeCreatedAt)) {
+      res.status(400).json({
+        error: `A ausência não pode ser registrada antes do vínculo do funcionário com a empresa (${employeeCreatedAt.format('DD/MM/YYYY')}).`,
+      });
+      return;
+    }
+
     const schedule = await WorkSchedule.findOne({ employeeId: employee._id });
     if (!schedule) {
       res.status(400).json({

@@ -11,31 +11,37 @@ export interface ITimesRecord extends Document {
     latitude: number; // Latitude da marcação de ponto
     longitude: number; // Longitude da marcação de ponto
   };
+  date: string;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 // Esquema de registro de ponto
-const TimeRecordSchema: Schema = new Schema({
-  employeeId: {
-    type: Schema.Types.ObjectId,
-    ref: 'Employee',
-    required: true, // Relacionamento obrigatório com o funcionário
-  },
-  clockIn: { type: Date, required: true }, // Registro de entrada obrigatório
-  lunchStart: { type: Date }, // Saída para almoço (opcional)
-  lunchEnd: { type: Date }, // Retorno do almoço (opcional)
-  clockOut: { type: Date }, // Saída do expediente (opcional)
+const TimeRecordSchema: Schema = new Schema(
+  {
+    employeeId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Employee',
+      required: true, // Relacionamento obrigatório com o funcionário
+    },
+    clockIn: { type: Date, required: true }, // Registro de entrada obrigatório
+    lunchStart: { type: Date }, // Saída para almoço (opcional)
+    lunchEnd: { type: Date }, // Retorno do almoço (opcional)
+    clockOut: { type: Date }, // Saída do expediente (opcional)
 
-  location: {
-    latitude: { type: Number, required: true }, // Localização de onde foi feito o ponto
-    longitude: { type: Number, required: true },
+    location: {
+      latitude: { type: Number, required: true }, // Localização de onde foi feito o ponto
+      longitude: { type: Number, required: true },
+    },
+    date: {
+      type: String,
+      required: true,
+    },
   },
-
-  date: {
-    type: String,
-    required: true, // Data do ponto no formato YYYY-MM-DD (fuso controlado no backend)
-  },
-});
-
+  {
+    timestamps: true, // <- adiciona createdAt e updatedAt automaticamente
+  }
+);
 // Exporta o modelo para uso em outras partes da aplicação
 export const TimeRecord = mongoose.model<ITimesRecord>(
   'TimeRecord',

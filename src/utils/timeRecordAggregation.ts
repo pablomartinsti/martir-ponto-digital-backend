@@ -10,6 +10,7 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
+import { Employee } from '../models/Employee';
 
 // Plugins do dayjs para lidar com fuso horário e comparação de datas
 dayjs.extend(utc);
@@ -65,11 +66,22 @@ export const getAggregatedTimeRecords = async (
   period: 'day' | 'week' | 'month'
 ) => {
   // Converte datas recebidas para objetos Date com fuso de São Paulo
-  const start = dayjs
-    .tz(startDate, 'America/Sao_Paulo')
-    .startOf('day')
-    .toDate();
-  const end = dayjs.tz(endDate, 'America/Sao_Paulo').endOf('day').toDate();
+  const start = dayjs.tz(startDate, 'America/Sao_Paulo').startOf('day');
+  const end = dayjs.tz(endDate, 'America/Sao_Paulo').endOf('day');
+
+  // 🔒 Busca o funcionário para pegar o createdAt
+  const employee = await Employee.findById(employeeId);
+  if (!employee) {
+    return {
+      period: { startDate, endDate, type: period },
+      records: [],
+      totalPositiveHours: '00:00:00',
+      totalNegativeHours: '00:00:00',
+      finalBalance: '00:00:00',
+      error: 'Funcionário não encontrado.',
+    };
+  }
+  const employeeCreatedAt = dayjs(employee.createdAt).startOf('day');
 
   // Busca a escala de trabalho do funcionário
   const schedule = await WorkSchedule.findOne({ employeeId });
@@ -153,17 +165,39 @@ export const getAggregatedTimeRecords = async (
   ]);
 
   // Geração de todas as datas do intervalo informado
-  const allDates: string[] = [];
-  let current = dayjs.tz(startDate, 'America/Sao_Paulo');
-  const endDayjs = dayjs.tz(endDate, 'America/Sao_Paulo');
+  const adjustedStart = start.isBefore(employeeCreatedAt)
+    ? employeeCreatedAt
+    : start;
+
+  const adjustedEnd = end;
   const today = dayjs().tz('America/Sao_Paulo').endOf('day');
 
+  // Gera todas as datas válidas do intervalo
+  const allDates: string[] = [];
+  let current = adjustedStart;
+
   while (
-    current.isSameOrBefore(endDayjs, 'day') &&
+    current.isSameOrBefore(adjustedEnd, 'day') &&
     current.isSameOrBefore(today, 'day')
   ) {
     allDates.push(current.format('YYYY-MM-DD'));
     current = current.add(1, 'day');
+  }
+
+  // Se nenhuma data for válida, retorna mensagem clara
+  if (allDates.length === 0) {
+    return {
+      period: {
+        startDate: adjustedStart.format('YYYY-MM-DD'),
+        endDate: adjustedEnd.format('YYYY-MM-DD'),
+        type: period,
+      },
+      records: [],
+      totalPositiveHours: '00:00:00',
+      totalNegativeHours: '00:00:00',
+      finalBalance: '00:00:00',
+      message: `Nenhuma data válida a partir da entrada do funcionário (${employeeCreatedAt.format('DD/MM/YYYY')}).`,
+    };
   }
 
   // Cria um mapa indexando os registros por data
@@ -187,6 +221,7 @@ export const getAggregatedTimeRecords = async (
     // Dia sem expediente
     if (!daySchedule || daySchedule.isDayOff) {
       return {
+        _id: record?._id,
         date: dateStr,
         workedHours: formatHours(0),
         balance: formatHours(0),
@@ -205,6 +240,7 @@ export const getAggregatedTimeRecords = async (
       }
 
       return {
+        _id: record?._id,
         date: dateStr,
         justified: true,
         clockIn: record?.clockIn || null,
@@ -230,6 +266,7 @@ export const getAggregatedTimeRecords = async (
       else totalNegativeHours += Math.abs(balance);
 
       return {
+        _id: record?._id,
         date: dateStr,
         clockIn: record.clockIn,
         lunchStart: record.lunchStart,
@@ -258,6 +295,7 @@ export const getAggregatedTimeRecords = async (
       else totalNegativeHours += Math.abs(balance);
 
       return {
+        _id: record?._id,
         date: dateStr,
         justified: true,
         clockIn: record?.clockIn || null,

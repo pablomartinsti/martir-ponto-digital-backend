@@ -16,7 +16,7 @@ const createAdmin = async () => {
     console.log('✅ Conectado ao MongoDB');
 
     // Verifica se já existe um admin com CPF padrão
-    const existing = await Employee.findOne({ cpf: '00000000000' });
+    const existing = await Employee.findOne({ cpf: '10274398666' });
     if (existing) {
       console.log('⚠️ Admin já existe');
       process.exit(0); // Encerra o script sem erro
@@ -28,7 +28,7 @@ const createAdmin = async () => {
     // Cria o documento do admin no banco
     const admin = new Employee({
       name: 'Admin Master',
-      cpf: '00000000000',
+      cpf: '10274398666',
       password: hashedPassword,
       role: 'admin', // Define o papel como admin geral
       position: 'Administrador', // Cargo

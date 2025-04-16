@@ -39,6 +39,7 @@ interface CustomRequest extends Request {
 }
 
 // Criar ou atualizar escala de trabalho
+// Criar ou atualizar escala de trabalho
 export const setWorkSchedule = async (
   req: CustomRequest,
   res: Response
@@ -51,21 +52,32 @@ export const setWorkSchedule = async (
       role: 'admin' | 'sub_admin';
       companyId?: string;
     };
-    // Verifica se o sub_admin tem permissão para editar a escala
-    if (requester.role === 'sub_admin') {
-      const employee = await Employee.findById(employeeId);
 
-      if (!employee) {
-        res.status(404).json({ error: 'Funcionário não encontrado.' });
-        return;
-      }
+    // 🔎 Busca o funcionário
+    const employee = await Employee.findById(employeeId);
+    if (!employee) {
+      res.status(404).json({ error: 'Funcionário não encontrado.' });
+      return;
+    }
 
-      if (String(employee.companyId) !== String(requester.companyId)) {
-        res.status(403).json({
-          error: 'Você só pode gerenciar funcionários da sua empresa.',
-        });
-        return;
-      }
+    // 🔒 Impede escalas para admin ou sub_admin
+    if (employee.role !== 'employee') {
+      res.status(400).json({
+        error:
+          'Escala só pode ser criada para funcionários do tipo "employee".',
+      });
+      return;
+    }
+
+    // 🔐 Se for sub_admin, verifica se o funcionário é da empresa dele
+    if (
+      requester.role === 'sub_admin' &&
+      String(employee.companyId) !== String(requester.companyId)
+    ) {
+      res.status(403).json({
+        error: 'Você só pode gerenciar funcionários da sua empresa.',
+      });
+      return;
     }
 
     const existingSchedule = await WorkSchedule.findOne({ employeeId });

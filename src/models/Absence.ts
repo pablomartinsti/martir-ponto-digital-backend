@@ -17,40 +17,47 @@ export interface IAbsence extends Document {
   type: AbsenceType; // Tipo de ausência (ver enum acima)
   description?: string; // Descrição opcional da ausência
   createdBy: mongoose.Types.ObjectId; // ID do sub_admin que registrou a ausência
+  createdAt?: Date; // adicionados
+  updatedAt?: Date;
 }
 
 // Esquema de ausência
-const AbsenceSchema = new Schema<IAbsence>({
-  employeeId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Employee',
-    required: true,
+const AbsenceSchema = new Schema<IAbsence>(
+  {
+    employeeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Employee',
+      required: true,
+    },
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Company',
+      required: true,
+    },
+    date: { type: String, required: true }, // Data no formato ISO (ex: "2025-04-09")
+    type: {
+      type: String,
+      enum: [
+        'vacation',
+        'sick_leave',
+        'justified',
+        'day_off',
+        'holiday',
+        'unjustified',
+      ],
+      required: true,
+    },
+    description: { type: String }, // Campo opcional para observações
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Employee', // Referência ao sub_admin que registrou
+      required: true,
+    },
   },
-  companyId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Company',
-    required: true,
-  },
-  date: { type: String, required: true }, // Data no formato ISO (ex: "2025-04-09")
-  type: {
-    type: String,
-    enum: [
-      'vacation',
-      'sick_leave',
-      'justified',
-      'day_off',
-      'holiday',
-      'unjustified',
-    ],
-    required: true,
-  },
-  description: { type: String }, // Campo opcional para observações
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Employee', // Referência ao sub_admin que registrou
-    required: true,
-  },
-});
+  {
+    timestamps: true, // <-- adiciona createdAt e updatedAt automaticamente
+  }
+);
 
 // Exporta o model para uso nos controllers
 export const Absence = mongoose.model<IAbsence>('Absence', AbsenceSchema);

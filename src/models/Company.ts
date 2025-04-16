@@ -7,15 +7,22 @@ export interface ICompany extends Document {
   cnpj: string; // CNPJ único da empresa
   latitude: number; // Latitude da localização da empresa
   longitude: number; // Longitude da localização da empresa
+  createdAt?: Date; // campo adicionado
+  updatedAt?: Date; // campo adicionado
 }
 
 // Esquema da empresa
-const CompanySchema = new Schema<ICompany>({
-  name: { type: String, required: true }, // Nome é obrigatório
-  cnpj: { type: String, required: true, unique: true }, // CNPJ obrigatório e único
-  latitude: { type: Number, required: true }, // Latitude da sede ou ponto de registro
-  longitude: { type: Number, required: true }, // Longitude da sede ou ponto de registro
-});
+const CompanySchema = new Schema<ICompany>(
+  {
+    name: { type: String, required: true }, // Nome é obrigatório
+    cnpj: { type: String, required: true, unique: true }, // CNPJ obrigatório e único
+    latitude: { type: Number, required: true }, // Latitude da sede ou ponto de registro
+    longitude: { type: Number, required: true }, // Longitude da sede ou ponto de registro
+  },
+  {
+    timestamps: true, // habilita createdAt e updatedAt automaticamente
+  }
+);
 
 // Exporta o modelo para uso nos controllers
 export const Company = mongoose.model<ICompany>('Company', CompanySchema);
