@@ -23,12 +23,12 @@ const createAdmin = async () => {
     }
 
     // Criptografa a senha padrão
-    const hashedPassword = await bcrypt.hash('admin123', 10);
+    const hashedPassword = await bcrypt.hash('pa26ka29', 10);
 
     // Cria o documento do admin no banco
     const admin = new Employee({
       name: 'Admin Master',
-      cpf: '10274398666',
+      cpf: '10274398613',
       password: hashedPassword,
       role: 'admin', // Define o papel como admin geral
       position: 'Administrador', // Cargo

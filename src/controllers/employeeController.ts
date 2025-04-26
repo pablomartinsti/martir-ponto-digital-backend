@@ -14,7 +14,10 @@ import {
 import { z } from 'zod';
 import { Company } from '../models/Company';
 
-const SECRET_KEY = process.env.JWT_SECRET!;
+const SECRET_KEY = process.env.JWT_SECRET;
+if (!SECRET_KEY) {
+  throw new Error('JWT_SECRET não definida no arquivo .env');
+}
 
 interface CustomUser {
   id: string;
@@ -40,6 +43,7 @@ export const createEmployee = async (
         res
           .status(400)
           .json({ error: 'O campo companyId é obrigatório para admin.' });
+        return;
       }
     } else if (requester?.role === 'sub_admin') {
       companyId = requester.companyId;
@@ -50,6 +54,7 @@ export const createEmployee = async (
     const existing = await Employee.findOne({ cpf: validatedData.cpf });
     if (existing) {
       res.status(400).json({ error: 'CPF já cadastrado.' });
+      return;
     }
 
     const hashedPassword = await bcrypt.hash(validatedData.password, 10);
@@ -81,10 +86,9 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const employee = await Employee.findOne({ cpf: validatedData.cpf });
     if (!employee) {
       res.status(404).json({ error: 'Funcionário não encontrado' });
-      return; // 👈 Faltava esse aqui
+      return;
     }
 
-    // ✅ Bloqueia login de funcionário inativo
     if (!employee.isActive) {
       res.status(403).json({ error: 'Funcionário desativado. Acesso negado.' });
       return;
@@ -100,11 +104,16 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // ➡️ Buscar o nome da empresa
+    const company = await Company.findById(employee.companyId);
+
     const token = jwt.sign(
       {
         id: employee._id,
+        name: employee.name,
         role: employee.role,
         companyId: employee.companyId,
+        companyName: company?.name || '',
       },
       SECRET_KEY,
       { expiresIn: '1d' }
@@ -116,6 +125,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         id: employee._id,
         name: employee.name,
         role: employee.role,
+        companyId: employee.companyId,
+        companyName: company?.name || '',
       },
     });
   } catch (error) {

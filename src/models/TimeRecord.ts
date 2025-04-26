@@ -2,16 +2,17 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 // Interface que representa um registro de ponto do funcionário
 export interface ITimesRecord extends Document {
-  employeeId: mongoose.Types.ObjectId; // Referência ao funcionário
-  clockIn: Date; // Data/hora de entrada
-  lunchStart?: Date; // Início do almoço (opcional)
-  lunchEnd?: Date; // Retorno do almoço (opcional)
-  clockOut?: Date; // Saída do expediente (opcional)
+  employeeId: mongoose.Types.ObjectId;
+  clockIn: Date;
+  lunchStart?: Date;
+  lunchEnd?: Date;
+  clockOut?: Date;
   location: {
-    latitude: number; // Latitude da marcação de ponto
-    longitude: number; // Longitude da marcação de ponto
+    latitude: number;
+    longitude: number;
   };
   date: string;
+  workedSeconds?: number; // 🔥 Adicionado
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -22,27 +23,31 @@ const TimeRecordSchema: Schema = new Schema(
     employeeId: {
       type: Schema.Types.ObjectId,
       ref: 'Employee',
-      required: true, // Relacionamento obrigatório com o funcionário
+      required: true,
     },
-    clockIn: { type: Date, required: true }, // Registro de entrada obrigatório
-    lunchStart: { type: Date }, // Saída para almoço (opcional)
-    lunchEnd: { type: Date }, // Retorno do almoço (opcional)
-    clockOut: { type: Date }, // Saída do expediente (opcional)
-
+    clockIn: { type: Date, required: true },
+    lunchStart: { type: Date },
+    lunchEnd: { type: Date },
+    clockOut: { type: Date },
     location: {
-      latitude: { type: Number, required: true }, // Localização de onde foi feito o ponto
+      latitude: { type: Number, required: true },
       longitude: { type: Number, required: true },
     },
     date: {
       type: String,
       required: true,
     },
+    workedSeconds: {
+      type: Number, // 🔥 Adicionado
+      required: false,
+    },
   },
   {
-    timestamps: true, // <- adiciona createdAt e updatedAt automaticamente
+    timestamps: true,
   }
 );
-// Exporta o modelo para uso em outras partes da aplicação
+
+// Exportação do modelo
 export const TimeRecord = mongoose.model<ITimesRecord>(
   'TimeRecord',
   TimeRecordSchema

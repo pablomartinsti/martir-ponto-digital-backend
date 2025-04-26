@@ -113,7 +113,7 @@ export const getTimeRecords = async (
     );
 
     if (!records.records || records.records.length === 0) {
-      res.status(404).json({ message: 'Nenhum registro encontrado.' });
+      res.status(200).json({ message: 'Nenhum registro encontrado.' });
       return;
     }
 
@@ -178,10 +178,6 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
       .set('second', 0)
       .set('millisecond', 0);
     const cincoMinAntes = startAllowed.subtract(5, 'minute');
-
-    console.log('🕒 Agora:', now.format());
-    console.log('🟩 Início da escala:', startAllowed.format());
-    console.log('🕔 Permitido a partir de:', cincoMinAntes.format());
 
     if (now.isBefore(cincoMinAntes)) {
       res.status(403).json({

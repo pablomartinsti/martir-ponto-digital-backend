@@ -25,6 +25,7 @@ const absenceSchema = z.object({
     'holiday',
     'day_off',
   ]),
+  description: z.string().optional(),
 });
 
 // Interface do usuário autenticado
@@ -82,7 +83,6 @@ export const createOrUpdateAbsence = async (
     const date = dayjs.tz(data.date);
     const today = dayjs().tz();
 
-    // Impede ausência para hoje ou datas futuras
     if (date.isSame(today, 'day') || date.isAfter(today)) {
       res.status(400).json({
         error: 'Só é permitido registrar ausência para datas passadas.',
@@ -90,47 +90,57 @@ export const createOrUpdateAbsence = async (
       return;
     }
 
-    // Impede ausência em dias com jornada completa
     const existingTimeRecord = await TimeRecord.findOne({
       employeeId: data.employeeId,
       date: data.date,
     });
-    if (
-      existingTimeRecord?.clockIn &&
-      existingTimeRecord?.lunchStart &&
-      existingTimeRecord?.lunchEnd &&
-      existingTimeRecord?.clockOut
-    ) {
-      res.status(400).json({
-        error:
-          'Não é possível registrar ausência em um dia com jornada completa.',
-      });
-      return;
+
+    if (existingTimeRecord) {
+      const missingPunches =
+        !existingTimeRecord.clockIn ||
+        !existingTimeRecord.lunchStart ||
+        !existingTimeRecord.lunchEnd ||
+        !existingTimeRecord.clockOut;
+
+      const workedSeconds = existingTimeRecord.workedSeconds || 0;
+
+      const dayOfWeek = date.format('dddd').toLowerCase();
+      const daySchedule = schedule.customDays.find(
+        (d) => d.day.toLowerCase() === dayOfWeek
+      );
+
+      const expectedSeconds = daySchedule
+        ? dayjs(daySchedule.end, 'HH:mm').diff(
+            dayjs(daySchedule.start, 'HH:mm'),
+            'second'
+          ) -
+          (daySchedule.hasLunch
+            ? (daySchedule.expectedLunchBreakMinutes || 0) * 60
+            : 0)
+        : 0;
+
+      if (!missingPunches) {
+        if (workedSeconds >= expectedSeconds) {
+          res.status(400).json({
+            error:
+              'Não é possível justificar uma jornada completa válida ou com saldo positivo (hora extra).',
+          });
+          return;
+        }
+      }
     }
 
-    // Verifica se o dia está configurado como dia útil na escala
-    const dayOfWeek = date.format('dddd').toLowerCase();
-    const daySchedule = schedule.customDays.find(
-      (d) => d.day.toLowerCase() === dayOfWeek
-    );
-
-    if (!daySchedule || daySchedule.isDayOff) {
-      res.status(400).json({
-        error: 'Não é possível registrar ausência em um dia sem expediente.',
-      });
-      return;
-    }
-
-    // Atualiza ausência existente ou cria nova
-    const existing = await Absence.findOne({
+    // Atualizar ausência existente ou criar nova
+    const existingAbsence = await Absence.findOne({
       employeeId: data.employeeId,
       date: data.date,
     });
 
-    if (existing) {
-      existing.type = data.type;
-      await existing.save();
-      res.status(200).json(existing);
+    if (existingAbsence) {
+      existingAbsence.type = data.type;
+      existingAbsence.description = data.description;
+      await existingAbsence.save();
+      res.status(200).json(existingAbsence);
       return;
     }
 
@@ -139,10 +149,11 @@ export const createOrUpdateAbsence = async (
       companyId: user.companyId,
       createdBy: user.id,
     });
+
     await absence.save();
     res.status(201).json(absence);
   } catch (error) {
-    console.error(error);
+    console.error('Erro ao registrar ausência:', error);
     res.status(500).json({ error: 'Erro ao registrar ausência.' });
   }
 };

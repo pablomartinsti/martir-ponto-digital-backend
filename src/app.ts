@@ -9,6 +9,8 @@ import employeeRoutes from './routes/employeeRoutes';
 import timeRecordRoutes from './routes/timeRecordRoutes';
 import workScheduleRoutes from './routes/workScheduleRoutes';
 import absenceRoutes from './routes/absence';
+import eventLogRoutes from './routes/eventLogRoutes';
+import { logRequest } from './middlewares/logRequest';
 
 const app = express();
 
@@ -18,6 +20,8 @@ app.use(express.json());
 // Middleware que habilita o CORS para aceitar requisições de diferentes origens
 app.use(cors());
 
+app.use(logRequest); // 🔹 ativa log de todas as requisições
+
 // Registro das rotas
 // Todas as rotas são montadas diretamente na raiz ("/")
 // Ex: POST /login, GET /companies, POST /absences etc.
@@ -26,6 +30,7 @@ app.use('/', timeRecordRoutes);
 app.use('/', workScheduleRoutes);
 app.use('/', companyRoutes);
 app.use('/', absenceRoutes);
+app.use('/', eventLogRoutes);
 
 // Exporta o app para ser usado no arquivo server.ts
 export default app;

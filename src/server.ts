@@ -12,8 +12,13 @@ import app from './app';
 // Lê a URI do MongoDB do arquivo .env
 const MONGO_URI = process.env.MONGO_URI as string;
 
-// Define a porta do servidor (padrão 3000 se não estiver definida no .env)
+// Define a porta do servidor (padrão 3001 se não estiver definida no .env)
 const PORT = process.env.PORT || 3000;
+
+if (!MONGO_URI) {
+  console.error('❌ Erro crítico: MONGO_URI não definida no arquivo .env');
+  process.exit(1);
+}
 
 // Função assíncrona que conecta ao MongoDB
 const connectToDataBase = async () => {

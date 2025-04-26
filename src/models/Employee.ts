@@ -13,7 +13,7 @@ export interface IEmployee extends Document {
   updatedAt?: Date; // campo adicionado
 }
 
-// Esquema do funcionário
+// Esquema do funcionário0]dzewa2q
 const EmployeeSchema: Schema = new Schema(
   {
     name: { type: String, required: true }, // Nome completo obrigatório
