@@ -27,6 +27,11 @@ interface CustomUser {
   companyId?: string;
 }
 
+interface LocationValidationResult {
+  isValid: boolean;
+  distance: number; // distância em metros
+}
+
 // Consulta registros de ponto agrupados por período
 export const getTimeRecords = async (
   req: Request,
@@ -146,17 +151,25 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
     const now = dayjs().tz('America/Sao_Paulo');
     const today = now.format('YYYY-MM-DD');
 
-    const isInLocation = validateLocation(
+    const { isValid, distance } = validateLocation(
       latitude,
       longitude,
       company.latitude,
       company.longitude
     );
 
-    if (!isInLocation) {
-      res.status(403).json({ error: 'Você parece estar fora da empresa.' });
+    if (!isValid) {
+      console.log(`Tentativa de bater ponto a ${distance} metros da empresa.`);
+
+      res.status(403).json({
+        error: `Você está a ${distance} metros da empresa. Aproxima-se para bater o ponto.`,
+      });
       return;
     }
+
+    console.log(
+      `Ponto registrado com sucesso: distância de ${distance} metros.`
+    );
 
     const schedule = await WorkSchedule.findOne({ employeeId });
     const dayOfWeek = now.format('dddd').toLowerCase();
@@ -248,17 +261,27 @@ const updateTimeRecordField = async (
       return;
     }
 
-    const isInLocation = validateLocation(
+    const { isValid, distance } = validateLocation(
       latitude,
       longitude,
       company.latitude,
       company.longitude
     );
 
-    if (!isInLocation) {
-      res.status(403).json({ error: 'Você parece estar fora da empresa.' });
+    if (!isValid) {
+      console.log(
+        `Tentativa de registro de ${field} a ${distance} metros da empresa.`
+      );
+
+      res.status(403).json({
+        error: `Você está a ${distance} metros da empresa. Aproxima-se para registrar o ponto.`,
+      });
       return;
     }
+
+    console.log(
+      `Registro de ${field} realizado: distância de ${distance} metros.`
+    );
 
     if (field === 'lunchStart' && timeRecord.lunchStart) {
       res.status(400).json({ error: 'Saída para almoço já registrada hoje.' });
@@ -340,10 +363,29 @@ const validateLocation = (
   userLng: number,
   companyLat: number,
   companyLng: number
-): boolean => {
-  const maxDistance = 0.002; // ~222 metros
-  return (
-    Math.abs(userLat - companyLat) <= maxDistance &&
-    Math.abs(userLng - companyLng) <= maxDistance
-  );
+): LocationValidationResult => {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+
+  const earthRadius = 6371e3; // Raio da Terra em metros
+
+  const dLat = toRad(companyLat - userLat);
+  const dLng = toRad(companyLng - userLng);
+
+  const lat1 = toRad(userLat);
+  const lat2 = toRad(companyLat);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  const distance = earthRadius * c;
+
+  const maxDistance = 100; // máximo permitido (em metros)
+
+  return {
+    isValid: distance <= maxDistance,
+    distance: Math.round(distance),
+  };
 };
