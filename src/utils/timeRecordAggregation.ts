@@ -215,7 +215,11 @@ export const getAggregatedTimeRecords = async (
     const dayOfWeek = dateInBrazil.format('dddd').toLowerCase();
 
     const daySchedule = schedulePerDay[dayOfWeek];
-    const absence = absences.find((a) => a.date === dateStr);
+
+    const absence = absences.find(
+      (a) => dayjs(a.date).format('YYYY-MM-DD') === dateStr
+    );
+
     const expectedHours = daySchedule ? getExpectedHours(daySchedule) : 0;
 
     // Dia sem expediente
