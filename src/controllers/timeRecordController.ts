@@ -382,7 +382,7 @@ const validateLocation = (
 
   const distance = earthRadius * c;
 
-  const maxDistance = 100; // máximo permitido (em metros)
+  const maxDistance = 50; // máximo permitido (em metros)
 
   return {
     isValid: distance <= maxDistance,

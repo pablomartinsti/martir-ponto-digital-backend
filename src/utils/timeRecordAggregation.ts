@@ -243,6 +243,7 @@ export const getAggregatedTimeRecords = async (
         _id: record?._id,
         date: dateStr,
         justified: true,
+        description: absence.description || '',
         clockIn: record?.clockIn || null,
         lunchStart: record?.lunchStart || null,
         lunchEnd: record?.lunchEnd || null,
