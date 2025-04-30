@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   createEmployee,
+  resetPassword,
   getEmployees,
   toggleEmployeeStatus,
   login,
@@ -19,6 +20,14 @@ router.post(
   authenticate,
   authorize(['admin', 'sub_admin']),
   createEmployee
+);
+
+// Apenas admin e sub_admin podem criar funcionários
+router.put(
+  '/users/:id/reset-password',
+  authenticate,
+  authorize(['admin']),
+  resetPassword
 );
 
 // Listar funcionários (admin e sub_admin com acesso limitado)

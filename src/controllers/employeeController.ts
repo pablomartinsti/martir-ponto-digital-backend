@@ -78,6 +78,47 @@ export const createEmployee = async (
   }
 };
 
+// Trocar senha do funcionário (apenas admin)
+export const resetPassword = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const { id } = req.params;
+  const { newPassword } = req.body;
+
+  const requester = (req as Request & { user?: CustomUser }).user;
+
+  if (!newPassword) {
+    res.status(400).json({ error: 'A nova senha é obrigatória.' });
+    return;
+  }
+
+  if (requester?.role !== 'admin') {
+    res.status(403).json({ error: 'Apenas o admin pode redefinir senhas.' });
+    return;
+  }
+
+  try {
+    const user = await Employee.findById(id);
+
+    if (!user) {
+      res.status(404).json({ error: 'Usuário não encontrado.' });
+      return;
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    user.password = hashed;
+    await user.save();
+
+    res.status(200).json({ message: 'Senha redefinida com sucesso.' });
+    return;
+  } catch (err) {
+    console.error('Erro ao redefinir senha:', err);
+    res.status(500).json({ error: 'Erro ao redefinir senha.' });
+    return;
+  }
+};
+
 // Login de funcionário com validação de senha e geração de token
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
