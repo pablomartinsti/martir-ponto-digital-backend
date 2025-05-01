@@ -93,8 +93,10 @@ export const resetPassword = async (
     return;
   }
 
-  if (requester?.role !== 'admin') {
-    res.status(403).json({ error: 'Apenas o admin pode redefinir senhas.' });
+  if (requester?.role !== 'admin' && requester?.role !== 'sub_admin') {
+    res
+      .status(403)
+      .json({ error: 'Apenas admin ou sub admin podem redefinir senhas.' });
     return;
   }
 
