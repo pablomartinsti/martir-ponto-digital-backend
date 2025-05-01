@@ -26,7 +26,7 @@ router.post(
 router.put(
   '/users/:id/reset-password',
   authenticate,
-  authorize(['admin']),
+  authorize(['admin', 'sub_admin']),
   resetPassword
 );
 
