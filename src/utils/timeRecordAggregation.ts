@@ -272,6 +272,7 @@ export const getAggregatedTimeRecords = async (
       const tolerance = 600; // 10 minutos em segundos
 
       let status = 'Jornada completa';
+      let adjustedBalance = balance;
 
       if (balanceInSeconds > tolerance) {
         totalPositiveHours += balance;
@@ -279,6 +280,8 @@ export const getAggregatedTimeRecords = async (
       } else if (balanceInSeconds < -tolerance) {
         totalNegativeHours += Math.abs(balance);
         status = 'Horas faltando';
+      } else {
+        adjustedBalance = 0; // Zera o saldo dentro da tolerância
       }
 
       return {
@@ -289,7 +292,7 @@ export const getAggregatedTimeRecords = async (
         lunchEnd: record.lunchEnd,
         clockOut: record.clockOut,
         workedHours: formatHours(workedHours),
-        balance: formatHours(balance),
+        balance: formatHours(adjustedBalance),
         status,
       };
     } else {
