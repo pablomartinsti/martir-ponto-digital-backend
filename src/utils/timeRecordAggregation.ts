@@ -266,9 +266,20 @@ export const getAggregatedTimeRecords = async (
       record?.clockOut
     ) {
       const workedHours = isNaN(record.workedHours) ? 0 : record.workedHours;
+      const expectedHours = daySchedule ? getExpectedHours(daySchedule) : 0;
       const balance = workedHours - expectedHours;
-      if (balance > 0) totalPositiveHours += balance;
-      else totalNegativeHours += Math.abs(balance);
+      const balanceInSeconds = Math.round(balance * 3600); // convertendo para segundos
+      const tolerance = 600; // 10 minutos em segundos
+
+      let status = 'Jornada completa';
+
+      if (balanceInSeconds > tolerance) {
+        totalPositiveHours += balance;
+        status = 'Hora extra';
+      } else if (balanceInSeconds < -tolerance) {
+        totalNegativeHours += Math.abs(balance);
+        status = 'Horas faltando';
+      }
 
       return {
         _id: record?._id,
@@ -279,12 +290,7 @@ export const getAggregatedTimeRecords = async (
         clockOut: record.clockOut,
         workedHours: formatHours(workedHours),
         balance: formatHours(balance),
-        status:
-          balance === 0
-            ? 'Jornada completa'
-            : balance > 0
-              ? 'Hora extra'
-              : 'Horas faltando',
+        status,
       };
     } else {
       // Jornada incompleta (parcial)
