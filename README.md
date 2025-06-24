@@ -94,22 +94,4 @@ Sistema de ponto digital desenvolvido para pequenas empresas com poucos funcion�
 
 ---
 
-## 🧠 Futuras Implementações
 
-- Painel web para sub_admins com relatórios detalhados
-- Notificações por e-mail
-- Dashboard para admin com visão geral de empresas
-- Exportação de relatórios em PDF
-- Suporte para justificativas de ponto via anexo
-
----
-
-## 🤝 Contribuições
-
-Contribuições são bem-vindas! Abra uma issue ou envie um pull request com sugestões, correções ou melhorias.
-
----
-
-## 📝 Licença
-
-Este projeto está sob a licença MIT.
