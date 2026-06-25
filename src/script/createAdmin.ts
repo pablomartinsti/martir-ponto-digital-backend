@@ -1,49 +1,45 @@
-// Script utilitário para criar o usuário "admin" master no banco de dados.
-// Esse script é executado manualmente apenas uma vez, geralmente após o deploy inicial.
-
 import mongoose from 'mongoose';
 import bcrypt from 'bcrypt';
-import 'dotenv/config'; // Carrega as variáveis de ambiente do .env
-import { Employee } from '../../src/models/Employee';
+import { Employee } from '../models/Employee';
+import { env } from '../config/env';
 
-// Obtém a URI de conexão com o MongoDB do arquivo .env
-const MONGO_URI = process.env.MONGO_URI as string;
+const ADMIN_CPF = process.env.INITIAL_ADMIN_CPF || '10274398613';
+const ADMIN_NAME = process.env.INITIAL_ADMIN_NAME || 'Admin Master';
+const ADMIN_PASSWORD = process.env.INITIAL_ADMIN_PASSWORD;
 
 const createAdmin = async () => {
-  try {
-    // Conecta ao banco de dados MongoDB
-    await mongoose.connect(MONGO_URI);
-    console.log('✅ Conectado ao MongoDB');
+  if (!ADMIN_PASSWORD) {
+    console.error('INITIAL_ADMIN_PASSWORD nao definida no .env');
+    process.exit(1);
+  }
 
-    // Verifica se já existe um admin com CPF padrão
-    const existing = await Employee.findOne({ cpf: '10274398666' });
+  try {
+    await mongoose.connect(env.MONGO_URI);
+    console.log('Conectado ao MongoDB');
+
+    const existing = await Employee.findOne({ cpf: ADMIN_CPF });
     if (existing) {
-      console.log('⚠️ Admin já existe');
-      process.exit(0); // Encerra o script sem erro
+      console.log('Admin ja existe');
+      process.exit(0);
     }
 
-    // Criptografa a senha padrão
-    const hashedPassword = await bcrypt.hash('pa26ka29', 10);
-
-    // Cria o documento do admin no banco
+    const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
     const admin = new Employee({
-      name: 'Admin Master',
-      cpf: '10274398613',
+      name: ADMIN_NAME,
+      cpf: ADMIN_CPF,
       password: hashedPassword,
-      role: 'admin', // Define o papel como admin geral
-      position: 'Administrador', // Cargo
+      role: 'admin',
+      position: 'Administrador',
       isActive: true,
     });
 
-    // Salva o admin no banco
     await admin.save();
-    console.log('✅ Admin criado com sucesso!');
-    process.exit(0); // Encerra o script com sucesso
+    console.log('Admin criado com sucesso!');
+    process.exit(0);
   } catch (err) {
-    console.error('❌ Erro ao criar admin:', err);
-    process.exit(1); // Encerra o script com erro
+    console.error('Erro ao criar admin:', err);
+    process.exit(1);
   }
 };
 
-// Executa a função
 createAdmin();

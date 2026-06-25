@@ -1,6 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-// Interface que representa um registro de ponto do funcionário
 export interface ITimesRecord extends Document {
   employeeId: mongoose.Types.ObjectId;
   clockIn: Date;
@@ -12,12 +11,11 @@ export interface ITimesRecord extends Document {
     longitude: number;
   };
   date: string;
-  workedSeconds?: number; // 🔥 Adicionado
+  workedSeconds?: number;
   createdAt?: Date;
   updatedAt?: Date;
 }
 
-// Esquema de registro de ponto
 const TimeRecordSchema: Schema = new Schema(
   {
     employeeId: {
@@ -38,7 +36,7 @@ const TimeRecordSchema: Schema = new Schema(
       required: true,
     },
     workedSeconds: {
-      type: Number, // 🔥 Adicionado
+      type: Number,
       required: false,
     },
   },
@@ -47,7 +45,8 @@ const TimeRecordSchema: Schema = new Schema(
   }
 );
 
-// Exportação do modelo
+TimeRecordSchema.index({ employeeId: 1, date: 1 }, { unique: true });
+
 export const TimeRecord = mongoose.model<ITimesRecord>(
   'TimeRecord',
   TimeRecordSchema

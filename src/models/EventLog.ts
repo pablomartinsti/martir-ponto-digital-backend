@@ -3,9 +3,9 @@ import mongoose from 'mongoose';
 const eventLogSchema = new mongoose.Schema(
   {
     userId: String,
-    userName: String, // 👈 Adicionado
+    userName: String,
     companyId: String,
-    companyName: String, // 👈 Adicionado
+    companyName: String,
     route: String,
     method: String,
     action: String,
@@ -18,5 +18,9 @@ const eventLogSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+eventLogSchema.index({ createdAt: -1 });
+eventLogSchema.index({ companyId: 1, createdAt: -1 });
+eventLogSchema.index({ userId: 1, createdAt: -1 });
 
 export default mongoose.model('EventLog', eventLogSchema);

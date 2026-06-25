@@ -1,46 +1,63 @@
 import { Request, Response } from 'express';
-import EventLog from '../models/EventLog';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
+import { z } from 'zod';
+import EventLog from '../models/EventLog';
+import { sanitizeLogData } from '../utils/security';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-export const createEventLog = async (req: Request, res: Response) => {
+const createEventLogSchema = z.object({
+  userId: z.string().optional(),
+  userName: z.string().optional(),
+  companyId: z.string().optional(),
+  companyName: z.string().optional(),
+  route: z.string().optional(),
+  method: z.string().optional(),
+  action: z.string().optional(),
+  status: z.string().optional(),
+  message: z.string().optional(),
+  data: z.unknown().optional(),
+  device: z.unknown().optional(),
+});
+
+const listEventLogsSchema = z.object({
+  userId: z.string().optional(),
+  companyId: z.string().optional(),
+  route: z.string().optional(),
+  status: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+});
+
+const deleteEventLogsSchema = z.object({
+  month: z.coerce.number().int().min(1).max(12),
+  year: z.coerce.number().int().min(2000).max(2100),
+  companyId: z.string().optional(),
+});
+
+export const createEventLog = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
-    const {
-      userId,
-      userName,
-      companyId,
-      companyName,
-      route,
-      method,
-      action,
-      status,
-      message,
-      data,
-      device,
-    } = req.body;
+    const payload = createEventLogSchema.parse(req.body);
 
-    const log = new EventLog({
-      userId,
-      userName,
-      companyId,
-      companyName,
-      route,
-      method,
-      action,
-      status,
-      message,
-      data,
-      device,
+    await EventLog.create({
+      ...payload,
+      data: sanitizeLogData(payload.data),
     });
-
-    await log.save();
 
     res.status(201).json({ message: 'Log registrado com sucesso.' });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ errors: error.errors });
+      return;
+    }
+
     console.error('Erro ao registrar log:', error);
     res.status(500).json({ error: 'Erro ao registrar log.' });
   }
@@ -51,23 +68,15 @@ export const getEventLogs = async (
   res: Response
 ): Promise<void> => {
   try {
-    const {
-      userId,
-      companyId,
-      route,
-      status,
-      limit = 50,
-      startDate,
-      endDate,
-    } = req.query;
+    const { userId, companyId, route, status, limit, startDate, endDate } =
+      listEventLogsSchema.parse(req.query);
 
-    const query: any = {};
+    const query: Record<string, unknown> = {};
     if (userId) query.userId = userId;
     if (companyId) query.companyId = companyId;
     if (route) query.route = route;
     if (status) query.status = status;
 
-    // 👇 Filtro por data usando dayjs
     if (startDate && endDate) {
       const start = dayjs
         .tz(`${startDate}T00:00:00`, 'America/Sao_Paulo')
@@ -84,12 +93,14 @@ export const getEventLogs = async (
       };
     }
 
-    const logs = await EventLog.find(query)
-      .sort({ createdAt: -1 })
-      .limit(Number(limit));
-
+    const logs = await EventLog.find(query).sort({ createdAt: -1 }).limit(limit);
     res.status(200).json(logs);
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ errors: error.errors });
+      return;
+    }
+
     console.error('Erro ao buscar logs:', error);
     res.status(500).json({ error: 'Erro ao buscar logs.' });
   }
@@ -100,25 +111,19 @@ export const deleteEventLogsByMonth = async (
   res: Response
 ): Promise<void> => {
   try {
-    const { month, year, companyId } = req.query;
-
-    if (!month || !year) {
-      res.status(400).json({ error: 'Mês e ano são obrigatórios.' });
-      return;
-    }
-
+    const { month, year, companyId } = deleteEventLogsSchema.parse(req.query);
+    const paddedMonth = String(month).padStart(2, '0');
     const startOfMonth = dayjs
-      .tz(`${year}-${month}-01T00:00:00`, 'America/Sao_Paulo')
+      .tz(`${year}-${paddedMonth}-01T00:00:00`, 'America/Sao_Paulo')
       .utc()
       .toDate();
-
     const endOfMonth = dayjs(startOfMonth)
       .endOf('month')
       .tz('America/Sao_Paulo')
       .utc()
       .toDate();
 
-    const query: any = {
+    const query: Record<string, unknown> = {
       createdAt: {
         $gte: startOfMonth,
         $lte: endOfMonth,
@@ -133,13 +138,14 @@ export const deleteEventLogsByMonth = async (
 
     res
       .status(200)
-      .json({ message: `${result.deletedCount} logs excluídos com sucesso.` });
-    return;
-  } catch (error: any) {
+      .json({ message: `${result.deletedCount} logs excluidos com sucesso.` });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ errors: error.errors });
+      return;
+    }
+
     console.error('Erro ao deletar logs:', error);
-    res
-      .status(500)
-      .json({ error: 'Erro ao deletar logs.', details: error.message });
-    return;
+    res.status(500).json({ error: 'Erro ao deletar logs.' });
   }
 };

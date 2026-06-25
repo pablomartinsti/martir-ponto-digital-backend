@@ -1,43 +1,42 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-// Interface que define a estrutura de um funcionário
 export interface IEmployee extends Document {
-  name: string; // Nome do funcionário
-  cpf: string; // CPF do funcionário (único)
-  password: string; // Senha criptografada
-  isActive: boolean; // Indica se o funcionário está ativo ou não
-  role: 'admin' | 'sub_admin' | 'employee'; // Papel do usuário no sistema
-  companyId?: mongoose.Types.ObjectId; // Referência à empresa (opcional para admin geral)
-  position: string; // Cargo ou função do funcionário
-  createdAt?: Date; // campo adicionado
-  updatedAt?: Date; // campo adicionado
+  name: string;
+  cpf: string;
+  password: string;
+  isActive: boolean;
+  role: 'admin' | 'sub_admin' | 'employee';
+  companyId?: mongoose.Types.ObjectId;
+  position: string;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
-// Esquema do funcionário0]dzewa2q
 const EmployeeSchema: Schema = new Schema(
   {
-    name: { type: String, required: true }, // Nome completo obrigatório
-    cpf: { type: String, required: true, unique: true }, // CPF único e obrigatório
-    password: { type: String, required: true }, // Senha armazenada com hash
-    isActive: { type: Boolean, default: true }, // Ativo por padrão
+    name: { type: String, required: true, trim: true },
+    cpf: { type: String, required: true, unique: true, trim: true },
+    password: { type: String, required: true, select: false },
+    isActive: { type: Boolean, default: true },
     role: {
       type: String,
-      enum: ['admin', 'sub_admin', 'employee'], // Tipos possíveis de papel no sistema
+      enum: ['admin', 'sub_admin', 'employee'],
       default: 'employee',
     },
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Company', // Relacionamento com a empresa
+      ref: 'Company',
       required: function (this: IEmployee) {
-        return this.role !== 'admin'; // Apenas admin geral não precisa estar vinculado a empresa
+        return this.role !== 'admin';
       },
     },
-    position: { type: String, required: true },
+    position: { type: String, required: true, trim: true },
   },
   {
-    timestamps: true, // <-- habilita createdAt e updatedAt
+    timestamps: true,
   }
 );
 
-// Exporta o modelo para ser usado nos controllers
+EmployeeSchema.index({ companyId: 1, role: 1 });
+
 export const Employee = mongoose.model<IEmployee>('Employee', EmployeeSchema);

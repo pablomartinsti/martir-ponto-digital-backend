@@ -1,24 +1,24 @@
-# Etapa 1: build
-FROM node:18-alpine AS build
+FROM node:24-alpine AS build
 
 WORKDIR /app
 
 COPY package*.json ./
-COPY tsconfig.json ./
-COPY . .
+RUN npm ci
 
-RUN npm install
+COPY tsconfig.json ./
+COPY src ./src
 RUN npm run build
 
-# Etapa 2: produção
-FROM node:18-alpine
+FROM node:24-alpine AS production
 
+ENV NODE_ENV=production
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --only=production
+RUN npm ci --omit=dev && npm cache clean --force
 
-COPY --from=build /app/build ./build
-COPY .env .env
+COPY --from=build --chown=node:node /app/build ./build
+
+USER node
 
 CMD ["node", "build/server.js"]

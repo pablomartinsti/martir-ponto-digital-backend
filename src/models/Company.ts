@@ -1,28 +1,24 @@
-// src/models/Company.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
-// Interface que representa uma empresa no sistema
 export interface ICompany extends Document {
-  name: string; // Nome da empresa
-  cnpj: string; // CNPJ único da empresa
-  latitude: number; // Latitude da localização da empresa
-  longitude: number; // Longitude da localização da empresa
-  createdAt?: Date; // campo adicionado
-  updatedAt?: Date; // campo adicionado
+  name: string;
+  cnpj: string;
+  latitude: number;
+  longitude: number;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
-// Esquema da empresa
 const CompanySchema = new Schema<ICompany>(
   {
-    name: { type: String, required: true }, // Nome é obrigatório
-    cnpj: { type: String, required: true, unique: true }, // CNPJ obrigatório e único
-    latitude: { type: Number, required: true }, // Latitude da sede ou ponto de registro
-    longitude: { type: Number, required: true }, // Longitude da sede ou ponto de registro
+    name: { type: String, required: true, trim: true },
+    cnpj: { type: String, required: true, unique: true, trim: true },
+    latitude: { type: Number, required: true },
+    longitude: { type: Number, required: true },
   },
   {
-    timestamps: true, // habilita createdAt e updatedAt automaticamente
+    timestamps: true,
   }
 );
 
-// Exporta o modelo para uso nos controllers
 export const Company = mongoose.model<ICompany>('Company', CompanySchema);

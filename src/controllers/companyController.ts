@@ -1,39 +1,27 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import bcrypt from 'bcrypt';
+import { z } from 'zod';
 import { Company } from '../models/Company';
 import { Employee } from '../models/Employee';
-import { z } from 'zod';
+import { AuthenticatedRequest } from '../types/auth';
 
-// Validação dos dados para criação de sub_admin e empresa
 const createSubAdminSchema = z.object({
-  name: z.string().min(1, 'O nome é obrigatório.'),
+  name: z.string().min(1, 'O nome e obrigatorio.'),
   cpf: z.string().length(11, 'O CPF deve ter 11 caracteres.'),
-  password: z.string().min(6, 'A senha deve ter no mínimo 6 caracteres.'),
-  companyName: z.string().min(1, 'O nome da empresa é obrigatório.'),
+  password: z.string().min(8, 'A senha deve ter no minimo 8 caracteres.'),
+  companyName: z.string().min(1, 'O nome da empresa e obrigatorio.'),
   cnpj: z.string().length(14, 'O CNPJ deve ter 14 caracteres.'),
-  position: z.string().min(1, 'O cargo é obrigatório.'),
-  latitude: z.number(), // 👈 novo campo
-  longitude: z.number(), // 👈 novo campo
+  position: z.string().min(1, 'O cargo e obrigatorio.'),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
 });
 
-interface CustomUser {
-  id: string;
-  role: 'admin' | 'sub_admin' | 'employee';
-  companyId?: string;
-}
-
-interface AuthenticatedRequest extends Request {
-  user?: CustomUser;
-}
-
-// Rota para criação de empresa e sub_admin vinculado a ela
 export const createSubAdmin = async (
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
   try {
     const validatedData = createSubAdminSchema.parse(req.body);
-
     const {
       name,
       cpf,
@@ -45,19 +33,18 @@ export const createSubAdmin = async (
       longitude,
     } = validatedData;
 
-    // Impede duplicação de empresa ou CPF
     const existingCompany = await Company.findOne({ cnpj });
     if (existingCompany) {
-      res.status(400).json({ error: 'Empresa já cadastrada com este CNPJ.' });
+      res.status(400).json({ error: 'Empresa ja cadastrada com este CNPJ.' });
       return;
     }
 
     const existingUser = await Employee.findOne({ cpf });
     if (existingUser) {
-      res.status(400).json({ error: 'CPF já está em uso.' });
+      res.status(400).json({ error: 'CPF ja esta em uso.' });
       return;
     }
-    // Cria a empresa
+
     const company = new Company({
       name: companyName,
       cnpj,
@@ -67,9 +54,7 @@ export const createSubAdmin = async (
 
     await company.save();
 
-    // Cria o sub_admin com senha criptografada
     const hashedPassword = await bcrypt.hash(password, 10);
-
     const subAdmin = new Employee({
       name,
       cpf,
@@ -92,33 +77,31 @@ export const createSubAdmin = async (
         companyId: subAdmin.companyId,
       },
     });
-    return;
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ errors: error.errors });
-    } else {
-      console.error('Erro ao criar sub admin:', error);
-      res.status(500).json({ error: 'Erro ao criar sub admin.' });
+      return;
     }
+
+    console.error('Erro ao criar sub admin:', error);
+    res.status(500).json({ error: 'Erro ao criar sub admin.' });
   }
 };
 
-// Rota para listagem de todas as empresas (acesso restrito a admin)
 export const getAllCompanies = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
   try {
-    const user = req.user as CustomUser;
+    const user = req.user;
 
-    if (user.role !== 'admin') {
+    if (!user || user.role !== 'admin') {
       res.status(403).json({
-        error:
-          'Acesso negado. Apenas administradores podem visualizar as empresas.',
+        error: 'Acesso negado. Apenas administradores podem visualizar empresas.',
       });
+      return;
     }
 
-    // Lista todas as empresas com nome e CNPJ
     const companies = await Company.find({}, '_id name cnpj');
     res.status(200).json(companies);
   } catch (error) {

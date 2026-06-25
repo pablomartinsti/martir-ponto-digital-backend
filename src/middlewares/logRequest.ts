@@ -1,42 +1,46 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import EventLog from '../models/EventLog';
+import { AuthenticatedRequest } from '../types/auth';
+import { sanitizeLogData } from '../utils/security';
+
+const parseDeviceInfo = (value: string | string[] | undefined) => {
+  if (!value || Array.isArray(value)) return null;
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
 
 export const logRequest = (
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): void => {
-  const start = Date.now();
-
   res.on('finish', async () => {
     try {
-      // ❌ Ignora requisições bem-sucedidas (apenas erros serão logados)
       if (res.statusCode < 400) return;
-
-      // ❌ Ignora a própria rota de log
       if (req.originalUrl === '/log-event') return;
-      const user = (req as any).user;
-      const deviceInfo = req.headers['x-device-info']
-        ? JSON.parse(req.headers['x-device-info'] as string)
-        : null;
 
       await EventLog.create({
-        userId: user?.id || null,
-        companyId: user?.companyId || null,
+        userId: req.user?.id || null,
+        userName: req.user?.name || null,
+        companyId: req.user?.companyId || null,
+        companyName: req.user?.companyName || null,
         route: req.originalUrl,
         method: req.method,
         action: `${req.method} ${req.originalUrl}`,
-        status: res.statusCode < 400 ? 'success' : 'error',
-        message: `Requisição finalizada com status ${res.statusCode}`,
-        data: req.body,
-        device: deviceInfo,
-        timestamp: new Date(),
+        status: 'error',
+        message: `Requisicao finalizada com status ${res.statusCode}`,
+        data: sanitizeLogData(req.body),
+        device: parseDeviceInfo(req.headers['x-device-info']),
       });
     } catch (err) {
       if (err instanceof Error) {
-        console.error('❌ Erro ao salvar log de requisição:', err.message);
+        console.error('Erro ao salvar log de requisicao:', err.message);
       } else {
-        console.error('❌ Erro ao salvar log de requisição:', err);
+        console.error('Erro ao salvar log de requisicao:', err);
       }
     }
   });

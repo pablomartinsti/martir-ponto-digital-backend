@@ -1,24 +1,27 @@
-// Controller responsável pelo registro de ponto (entrada, almoço e saída), validações de localização,
-// e consulta de registros agregados (por dia, semana ou mês).
 import { Request, Response } from 'express';
-import { getAggregatedTimeRecords } from '../utils/timeRecordAggregation';
-import { TimeRecord } from '../models/TimeRecord';
-import { Employee } from '../models/Employee';
-import { WorkSchedule } from '../models/WorkSchedule';
-import { z } from 'zod';
-import { Company } from '../models/Company';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
+import { z } from 'zod';
+import { Company } from '../models/Company';
+import { Employee } from '../models/Employee';
+import { TimeRecord } from '../models/TimeRecord';
+import { WorkSchedule } from '../models/WorkSchedule';
+import { AuthenticatedRequest } from '../types/auth';
+import { getAggregatedTimeRecords } from '../utils/timeRecordAggregation';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-// Validação do schema de entrada do ponto
 const clockInSchema = z.object({
-  employeeId: z.string().nonempty('O ID do funcionário é obrigatório.'),
-  latitude: z.number(),
-  longitude: z.number(),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+});
+
+const updateTimeRecordSchema = z.object({
+  recordId: z.string().nonempty('O ID do registro de ponto e obrigatorio.'),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
 });
 
 interface CustomUser {
@@ -29,10 +32,9 @@ interface CustomUser {
 
 interface LocationValidationResult {
   isValid: boolean;
-  distance: number; // distância em metros
+  distance: number;
 }
 
-// Consulta registros de ponto agrupados por período
 export const getTimeRecords = async (
   req: Request,
   res: Response
@@ -42,19 +44,19 @@ export const getTimeRecords = async (
     const user = (req as Request & { user?: CustomUser }).user;
 
     if (!user) {
-      res.status(401).json({ error: 'Usuário não autenticado.' });
+      res.status(401).json({ error: 'Usuario nao autenticado.' });
       return;
     }
 
     if (!startDate || !endDate || !period) {
-      res.status(400).json({ error: 'Parâmetros obrigatórios ausentes.' });
+      res.status(400).json({ error: 'Parametros obrigatorios ausentes.' });
       return;
     }
 
     if (!['day', 'week', 'month'].includes(period as string)) {
       res
         .status(400)
-        .json({ error: 'Período inválido. Use day, week ou month.' });
+        .json({ error: 'Periodo invalido. Use day, week ou month.' });
       return;
     }
 
@@ -63,27 +65,27 @@ export const getTimeRecords = async (
 
     if (user.role === 'admin') {
       if (!employeeId) {
-        res.status(400).json({ error: 'employeeId é obrigatório para admin.' });
+        res.status(400).json({ error: 'employeeId e obrigatorio para admin.' });
         return;
       }
       employeeIdConsultado = String(employeeId);
       employee = await Employee.findById(employeeId);
       if (!employee) {
-        res.status(404).json({ error: 'Funcionário não encontrado.' });
+        res.status(404).json({ error: 'Funcionario nao encontrado.' });
         return;
       }
     } else if (user.role === 'sub_admin') {
       if (!employeeId) {
         res
           .status(400)
-          .json({ error: 'employeeId é obrigatório para sub_admin.' });
+          .json({ error: 'employeeId e obrigatorio para sub_admin.' });
         return;
       }
 
       employee = await Employee.findById(employeeId);
       if (!employee || String(employee.companyId) !== user.companyId) {
         res.status(403).json({
-          error: 'Permissão negada. Funcionário não pertence à sua empresa.',
+          error: 'Permissao negada. Funcionario nao pertence a sua empresa.',
         });
         return;
       }
@@ -93,15 +95,14 @@ export const getTimeRecords = async (
       employeeIdConsultado = user.id;
       employee = await Employee.findById(user.id);
       if (!employee) {
-        res.status(404).json({ error: 'Funcionário não encontrado.' });
+        res.status(404).json({ error: 'Funcionario nao encontrado.' });
         return;
       }
     } else {
-      res.status(403).json({ error: 'Permissão negada.' });
+      res.status(403).json({ error: 'Permissao negada.' });
       return;
     }
 
-    // 🔒 Ajuste: impedir registros antes da criação do funcionário
     const inputStart = dayjs(String(startDate)).startOf('day');
     const inputEnd = dayjs(String(endDate)).endOf('day');
     const createdAt = dayjs(employee.createdAt).startOf('day');
@@ -129,25 +130,37 @@ export const getTimeRecords = async (
   }
 };
 
-// Registro de entrada (clock-in)
-
-export const clockIn = async (req: Request, res: Response): Promise<void> => {
+export const clockIn = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
   try {
-    const { employeeId, latitude, longitude } = clockInSchema.parse(req.body);
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return;
+    }
+
+    const { latitude, longitude } = clockInSchema.parse(req.body);
+    const employeeId = user.id;
 
     const employee = await Employee.findById(employeeId);
     if (!employee) {
-      res.status(404).json({ error: 'Funcionário não encontrado' });
+      res.status(404).json({ error: 'Funcionario nao encontrado.' });
+      return;
+    }
+
+    if (!employee.isActive) {
+      res.status(403).json({ error: 'Funcionario desativado.' });
       return;
     }
 
     const company = await Company.findById(employee.companyId);
     if (!company) {
-      res.status(404).json({ error: 'Empresa vinculada não encontrada.' });
+      res.status(404).json({ error: 'Empresa vinculada nao encontrada.' });
       return;
     }
 
-    // ✅ Usa hora de Brasília corretamente
     const now = dayjs().tz('America/Sao_Paulo');
     const today = now.format('YYYY-MM-DD');
 
@@ -159,30 +172,23 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
     );
 
     if (!isValid) {
-      console.log(`Tentativa de bater ponto a ${distance} metros da empresa.`);
-
       res.status(403).json({
-        error: `Você está a ${distance} metros da empresa. Aproxima-se para bater o ponto.`,
+        error: `Voce esta a ${distance} metros da empresa. Aproxime-se para bater o ponto.`,
       });
       return;
     }
 
-    console.log(
-      `Ponto registrado com sucesso: distância de ${distance} metros.`
-    );
-
     const schedule = await WorkSchedule.findOne({ employeeId });
     const dayOfWeek = now.format('dddd').toLowerCase();
     const todaySchedule = schedule?.customDays.find(
-      (d) => d.day.toLowerCase() === dayOfWeek
+      (day) => day.day.toLowerCase() === dayOfWeek
     );
 
     if (!todaySchedule || todaySchedule.isDayOff) {
-      res.status(403).json({ error: 'Hoje é folga ou não possui escala.' });
+      res.status(403).json({ error: 'Hoje e folga ou nao possui escala.' });
       return;
     }
 
-    // 🕐 Define início permitido e tolerância de 5 minutos antes
     const [hour, minute] = todaySchedule.start.split(':').map(Number);
     const startAllowed = now
       .clone()
@@ -195,9 +201,8 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
     if (now.isBefore(cincoMinAntes)) {
       res.status(403).json({
         error:
-          'Você ainda não pode iniciar a jornada. É permitido bater ponto até 5 minutos antes do horário da escala.',
+          'Voce ainda nao pode iniciar a jornada. E permitido bater ponto ate 5 minutos antes do horario da escala.',
       });
-
       return;
     }
 
@@ -207,7 +212,7 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
     });
 
     if (existingRecord?.clockIn) {
-      res.status(400).json({ error: 'Jornada já iniciada hoje.' });
+      res.status(400).json({ error: 'Jornada ja iniciada hoje.' });
       return;
     }
 
@@ -234,30 +239,49 @@ export const clockIn = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-// Atualiza um campo específico do registro de ponto (almoço ou saída)
 const updateTimeRecordField = async (
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   field: 'lunchStart' | 'lunchEnd' | 'clockOut'
 ): Promise<void> => {
   try {
-    const { recordId, latitude, longitude } = req.body;
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return;
+    }
+
+    const { recordId, latitude, longitude } = updateTimeRecordSchema.parse(
+      req.body
+    );
 
     const timeRecord = await TimeRecord.findById(recordId);
     if (!timeRecord) {
-      res.status(404).json({ error: 'Registro de ponto não encontrado.' });
+      res.status(404).json({ error: 'Registro de ponto nao encontrado.' });
+      return;
+    }
+
+    if (String(timeRecord.employeeId) !== user.id) {
+      res.status(403).json({
+        error: 'Permissao negada para alterar registro de outro funcionario.',
+      });
       return;
     }
 
     const employee = await Employee.findById(timeRecord.employeeId);
     if (!employee) {
-      res.status(404).json({ error: 'Funcionário não encontrado.' });
+      res.status(404).json({ error: 'Funcionario nao encontrado.' });
+      return;
+    }
+
+    if (!employee.isActive) {
+      res.status(403).json({ error: 'Funcionario desativado.' });
       return;
     }
 
     const company = await Company.findById(employee.companyId);
     if (!company) {
-      res.status(404).json({ error: 'Empresa não encontrada.' });
+      res.status(404).json({ error: 'Empresa nao encontrada.' });
       return;
     }
 
@@ -269,22 +293,14 @@ const updateTimeRecordField = async (
     );
 
     if (!isValid) {
-      console.log(
-        `Tentativa de registro de ${field} a ${distance} metros da empresa.`
-      );
-
       res.status(403).json({
-        error: `Você está a ${distance} metros da empresa. Aproxima-se para registrar o ponto.`,
+        error: `Voce esta a ${distance} metros da empresa. Aproxime-se para registrar o ponto.`,
       });
       return;
     }
 
-    console.log(
-      `Registro de ${field} realizado: distância de ${distance} metros.`
-    );
-
     if (field === 'lunchStart' && timeRecord.lunchStart) {
-      res.status(400).json({ error: 'Saída para almoço já registrada hoje.' });
+      res.status(400).json({ error: 'Saida para almoco ja registrada hoje.' });
       return;
     }
 
@@ -292,13 +308,13 @@ const updateTimeRecordField = async (
       if (!timeRecord.lunchStart) {
         res
           .status(400)
-          .json({ error: 'Saída para almoço ainda não registrada.' });
+          .json({ error: 'Saida para almoco ainda nao registrada.' });
         return;
       }
       if (timeRecord.lunchEnd) {
         res
           .status(400)
-          .json({ error: 'Retorno do almoço já registrado hoje.' });
+          .json({ error: 'Retorno do almoco ja registrado hoje.' });
         return;
       }
 
@@ -307,33 +323,34 @@ const updateTimeRecordField = async (
       });
 
       const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'long' })
-        .format(new Date((timeRecord as any).date + 'T00:00:00'))
+        .format(new Date(`${timeRecord.date}T00:00:00`))
         .toLowerCase();
 
       const todaySchedule = schedule?.customDays.find(
-        (d) => d.day.toLowerCase() === dayOfWeek
+        (day) => day.day.toLowerCase() === dayOfWeek
       );
       const expectedBreakMinutes =
         todaySchedule?.expectedLunchBreakMinutes || 60;
 
       const diffInMs =
-        new Date().getTime() - new Date(timeRecord.lunchStart).getTime();
+        dayjs().tz('America/Sao_Paulo').toDate().getTime() -
+        new Date(timeRecord.lunchStart).getTime();
       const diffInMinutes = diffInMs / 60000;
 
       if (diffInMinutes < expectedBreakMinutes) {
         res.status(403).json({
-          error: `Tempo mínimo de intervalo para almoço: ${expectedBreakMinutes} minutos.`,
+          error: `Tempo minimo de intervalo para almoco: ${expectedBreakMinutes} minutos.`,
         });
         return;
       }
     }
 
     if (field === 'clockOut' && timeRecord.clockOut) {
-      res.status(400).json({ error: 'Jornada já finalizada hoje.' });
+      res.status(400).json({ error: 'Jornada ja finalizada hoje.' });
       return;
     }
 
-    timeRecord[field] = new Date();
+    timeRecord[field] = dayjs().tz('America/Sao_Paulo').toDate();
     await timeRecord.save();
 
     res.status(200).json(timeRecord);
@@ -347,17 +364,21 @@ const updateTimeRecordField = async (
   }
 };
 
-// Funções específicas de atualização
-export const startLunch = (req: Request, res: Response): Promise<void> =>
-  updateTimeRecordField(req, res, 'lunchStart');
+export const startLunch = (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => updateTimeRecordField(req, res, 'lunchStart');
 
-export const endLunch = (req: Request, res: Response): Promise<void> =>
-  updateTimeRecordField(req, res, 'lunchEnd');
+export const endLunch = (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => updateTimeRecordField(req, res, 'lunchEnd');
 
-export const clockOut = (req: Request, res: Response): Promise<void> =>
-  updateTimeRecordField(req, res, 'clockOut');
+export const clockOut = (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => updateTimeRecordField(req, res, 'clockOut');
 
-// Validação de proximidade da localização do funcionário com a da empresa
 const validateLocation = (
   userLat: number,
   userLng: number,
@@ -366,26 +387,20 @@ const validateLocation = (
 ): LocationValidationResult => {
   const toRad = (value: number) => (value * Math.PI) / 180;
 
-  const earthRadius = 6371e3; // Raio da Terra em metros
-
+  const earthRadius = 6371e3;
   const dLat = toRad(companyLat - userLat);
   const dLng = toRad(companyLng - userLng);
-
   const lat1 = toRad(userLat);
   const lat2 = toRad(companyLat);
 
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
   const distance = earthRadius * c;
 
-  const maxDistance = 50; // máximo permitido (em metros)
-
   return {
-    isValid: distance <= maxDistance,
+    isValid: distance <= 50,
     distance: Math.round(distance),
   };
 };
