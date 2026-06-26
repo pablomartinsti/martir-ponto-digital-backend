@@ -4,6 +4,7 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { z } from 'zod';
 import EventLog from '../models/EventLog';
+import { asyncHandler } from '../middlewares/asyncHandler';
 import { sanitizeLogData } from '../utils/security';
 
 dayjs.extend(utc);
@@ -39,11 +40,8 @@ const deleteEventLogsSchema = z.object({
   companyId: z.string().optional(),
 });
 
-export const createEventLog = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  try {
+export const createEventLog = asyncHandler(
+  async (req: Request, res: Response) => {
     const payload = createEventLogSchema.parse(req.body);
 
     await EventLog.create({
@@ -52,22 +50,11 @@ export const createEventLog = async (
     });
 
     res.status(201).json({ message: 'Log registrado com sucesso.' });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      res.status(400).json({ errors: error.errors });
-      return;
-    }
-
-    console.error('Erro ao registrar log:', error);
-    res.status(500).json({ error: 'Erro ao registrar log.' });
   }
-};
+);
 
-export const getEventLogs = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  try {
+export const getEventLogs = asyncHandler(
+  async (req: Request, res: Response) => {
     const { userId, companyId, route, status, limit, startDate, endDate } =
       listEventLogsSchema.parse(req.query);
 
@@ -95,22 +82,11 @@ export const getEventLogs = async (
 
     const logs = await EventLog.find(query).sort({ createdAt: -1 }).limit(limit);
     res.status(200).json(logs);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      res.status(400).json({ errors: error.errors });
-      return;
-    }
-
-    console.error('Erro ao buscar logs:', error);
-    res.status(500).json({ error: 'Erro ao buscar logs.' });
   }
-};
+);
 
-export const deleteEventLogsByMonth = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  try {
+export const deleteEventLogsByMonth = asyncHandler(
+  async (req: Request, res: Response) => {
     const { month, year, companyId } = deleteEventLogsSchema.parse(req.query);
     const paddedMonth = String(month).padStart(2, '0');
     const startOfMonth = dayjs
@@ -136,16 +112,8 @@ export const deleteEventLogsByMonth = async (
 
     const result = await EventLog.deleteMany(query);
 
-    res
-      .status(200)
-      .json({ message: `${result.deletedCount} logs excluidos com sucesso.` });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      res.status(400).json({ errors: error.errors });
-      return;
-    }
-
-    console.error('Erro ao deletar logs:', error);
-    res.status(500).json({ error: 'Erro ao deletar logs.' });
+    res.status(200).json({
+      message: `${result.deletedCount} logs excluidos com sucesso.`,
+    });
   }
-};
+);
