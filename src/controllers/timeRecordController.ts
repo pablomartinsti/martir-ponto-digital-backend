@@ -119,7 +119,11 @@ export const getTimeRecords = async (
     );
 
     if (!records.records || records.records.length === 0) {
-      res.status(200).json({ message: 'Nenhum registro encontrado.' });
+      res.status(200).json({
+        ...records,
+        records: [],
+        message: records.message || records.error || 'Nenhum registro encontrado.',
+      });
       return;
     }
 
