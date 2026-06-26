@@ -5,6 +5,7 @@ import {
   endLunch,
   clockOut,
   getTimeRecords,
+  getTodayTimeRecord,
 } from '../controllers/timeRecordController';
 import { authenticate, authorize } from '../middlewares/authMiddleware';
 
@@ -23,6 +24,13 @@ router.post('/lunch-end', authenticate, authorize(['employee']), endLunch);
 router.post('/clock-out', authenticate, authorize(['employee']), clockOut);
 
 //Retorna registros de ponto agregados por período (dia, semana ou mês)
+router.get(
+  '/time-records/today',
+  authenticate,
+  authorize(['employee']),
+  getTodayTimeRecord
+);
+
 router.get(
   '/time-records',
   authenticate,

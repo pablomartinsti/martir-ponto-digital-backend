@@ -122,7 +122,8 @@ export const getTimeRecords = async (
       res.status(200).json({
         ...records,
         records: [],
-        message: records.message || records.error || 'Nenhum registro encontrado.',
+        message:
+          records.message || records.error || 'Nenhum registro encontrado.',
       });
       return;
     }
@@ -382,6 +383,32 @@ export const clockOut = (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => updateTimeRecordField(req, res, 'clockOut');
+
+export const getTodayTimeRecord = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    const user = req.user;
+
+    if (!user) {
+      res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return;
+    }
+
+    const today = dayjs().tz('America/Sao_Paulo').format('YYYY-MM-DD');
+
+    const record = await TimeRecord.findOne({
+      employeeId: user.id,
+      date: today,
+    });
+
+    res.status(200).json({ record: record || null });
+  } catch (error) {
+    console.error('Erro ao buscar registro do dia:', error);
+    res.status(500).json({ error: 'Erro ao buscar registro do dia.' });
+  }
+};
 
 const validateLocation = (
   userLat: number,
