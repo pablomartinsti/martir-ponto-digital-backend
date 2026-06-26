@@ -64,7 +64,7 @@ const validateTimeRecordFlow = async (
     const todaySchedule = schedule?.customDays.find(
       (day) => day.day.toLowerCase() === dayOfWeek
     );
-    const expectedBreakMinutes = todaySchedule?.expectedLunchBreakMinutes || 60;
+    const expectedBreakMinutes = todaySchedule?.expectedLunchBreakMinutes || 0;
 
     const diffInMs =
       dayjs().tz(BRAZIL_TIMEZONE).toDate().getTime() -
